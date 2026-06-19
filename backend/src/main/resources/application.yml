@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: orar-backend
+  datasource:
+    url: jdbc:postgresql://localhost:5432/orar
+    username: orar
+    password: orar
+  jpa:
+    hibernate:
+      # Flyway owns the schema; Hibernate only validates it matches the entities.
+      ddl-auto: validate
+    # Keep the session open during view rendering so lazy collections (e.g. Room.availabilities)
+    # and getReference proxies serialize without "no Session" errors. Fine for this single-user app.
+    open-in-view: true
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  servlet:
+    multipart:
+      # Excel imports can be a few MB; allow generous limits.
+      max-file-size: 25MB
+      max-request-size: 25MB
+
+# Timefold solver defaults. The per-request time budget overrides termination
+# dynamically (see SolverService); this is only a safety fallback.
+timefold:
+  solver:
+    termination:
+      spent-limit: 60s
+
+server:
+  port: 8080
+
+logging:
+  level:
+    ai.timefold.solver: INFO

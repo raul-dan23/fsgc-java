@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: orar-postgres
+    environment:
+      POSTGRES_DB: orar
+      POSTGRES_USER: orar
+      POSTGRES_PASSWORD: orar
+    ports:
+      - "5432:5432"
+    volumes:
+      - orar-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orar -d orar"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  orar-pgdata:
