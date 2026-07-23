@@ -1,8 +1,10 @@
 package ro.uvt.fsgc.orar.solver;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import ai.timefold.solver.test.api.score.stream.ConstraintVerifier;
 import java.time.DayOfWeek;
 import java.time.LocalTime;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import ro.uvt.fsgc.orar.domain.ActivityType;
@@ -270,5 +272,140 @@ class TimetableConstraintProviderTest {
                         activity(prof("Y"), ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 2),
                                 room("V01", 50, RoomTypology.SEMINAR, parvan), WeekParity.EVERY_WEEK, g))
                 .penalizes(1);
+    }
+
+    // ----- medium constraint test -----
+
+    @Test
+    void unassignedActivity_noTimeSlot_penalized() {
+        ScheduledActivity a = new ScheduledActivity();
+        a.setId(ids++);
+        Subject s = new Subject();
+        s.setId(ids++);
+        s.setCode("U1");
+        s.setName("Unplaced");
+        a.setSubject(s);
+        a.setActivityType(ActivityType.COURSE);
+        a.setWeekParity(WeekParity.EVERY_WEEK);
+        a.setSpecialCategory(SpecialCategory.NORMAL);
+        a.setStudentGroups(Set.of(group("G1", "G", 1, StudyProgram.LICENSE, 20)));
+        // timeSlot and room are null → unassigned
+        verifier.verifyThat(TimetableConstraintProvider::unassignedActivity)
+                .given(a)
+                .penalizes(1);
+    }
+
+    // ----- soft constraint tests -----
+
+    @Test
+    void dailyLoadBalance_skewedGroup_penalized() {
+        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
+        Room r = room("R1", 50, RoomTypology.SEMINAR, null);
+        Professor p = prof("P");
+        // 3 activities on Monday, none elsewhere → busiestMinusEmptiest = 3
+        verifier.verifyThat(TimetableConstraintProvider::dailyLoadBalance)
+                .given(g,
+                        activity(p, ActivityType.COURSE, slot(DayOfWeek.MONDAY, 1), r, WeekParity.EVERY_WEEK, g),
+                        activity(p, ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 2), r, WeekParity.EVERY_WEEK, g),
+                        activity(p, ActivityType.LAB, slot(DayOfWeek.MONDAY, 3), r, WeekParity.EVERY_WEEK, g))
+                .penalizes(1);
+    }
+
+    @Test
+    void groupGap_gapBetweenSlots_penalized() {
+        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
+        Room r = room("R1", 50, RoomTypology.SEMINAR, null);
+        Professor p = prof("P");
+        // Slots 1 and 3 on Monday → gap at slot 2 → gapCount = 1
+        verifier.verifyThat(TimetableConstraintProvider::groupGap)
+                .given(g,
+                        activity(p, ActivityType.COURSE, slot(DayOfWeek.MONDAY, 1), r, WeekParity.EVERY_WEEK, g),
+                        activity(p, ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 3), r, WeekParity.EVERY_WEEK, g))
+                .penalizes(1);
+    }
+
+    @Test
+    void lateHoursLicense_slot7_penalized() {
+        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
+        verifier.verifyThat(TimetableConstraintProvider::lateHoursLicense)
+                .given(activity(prof("X"), ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 7),
+                        room("R1", 50, RoomTypology.SEMINAR, null), WeekParity.EVERY_WEEK, g))
+                .penalizes(1);
+    }
+
+    @Test
+    void lateHoursLicense_masterSlot7_notPenalized() {
+        StudentGroup m = group("M1", "MPA", 1, StudyProgram.MASTER, 20);
+        verifier.verifyThat(TimetableConstraintProvider::lateHoursLicense)
+                .given(activity(prof("X"), ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 7),
+                        room("R1", 50, RoomTypology.SEMINAR, null), WeekParity.EVERY_WEEK, m))
+                .penalizes(0);
+    }
+
+    @Test
+    void lateHoursLicense_licenseSlot6_notPenalized() {
+        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
+        verifier.verifyThat(TimetableConstraintProvider::lateHoursLicense)
+                .given(activity(prof("X"), ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 6),
+                        room("R1", 50, RoomTypology.SEMINAR, null), WeekParity.EVERY_WEEK, g))
+                .penalizes(0);
+    }
+
+    @Test
+    void compactness_firstSlotLate_penalized() {
+        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
+        Room r = room("R1", 50, RoomTypology.SEMINAR, null);
+        // Only activity on Monday at slot 3 → firstSlot=3, penalty=3-1=2 → 1 match
+        verifier.verifyThat(TimetableConstraintProvider::compactness)
+                .given(g, activity(prof("X"), ActivityType.COURSE, slot(DayOfWeek.MONDAY, 3), r,
+                        WeekParity.EVERY_WEEK, g))
+                .penalizes(1);
+    }
+
+    @Test
+    void globalWeeklyBalance_activitiesOnOneDay_penalized() {
+        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
+        Room r = room("R1", 50, RoomTypology.SEMINAR, null);
+        // 1 activity on Monday → 1 groupBy match (count=1, penalty=1²=1)
+        verifier.verifyThat(TimetableConstraintProvider::globalWeeklyBalance)
+                .given(activity(prof("X"), ActivityType.COURSE, slot(DayOfWeek.MONDAY, 1), r,
+                        WeekParity.EVERY_WEEK, g))
+                .penalizes(1);
+    }
+
+    // ----- static helper unit tests -----
+
+    @Test
+    void busiestMinusEmptiest_allOnMonday_returnsCount() {
+        var days = List.of(DayOfWeek.MONDAY, DayOfWeek.MONDAY, DayOfWeek.MONDAY);
+        assertThat(TimetableConstraintProvider.busiestMinusEmptiest(days)).isEqualTo(3);
+    }
+
+    @Test
+    void busiestMinusEmptiest_onePerDay_returnsZero() {
+        var days = List.of(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY,
+                DayOfWeek.THURSDAY, DayOfWeek.FRIDAY);
+        assertThat(TimetableConstraintProvider.busiestMinusEmptiest(days)).isEqualTo(0);
+    }
+
+    @Test
+    void gapCount_consecutiveSlots_returnsZero() {
+        assertThat(TimetableConstraintProvider.gapCount(List.of(1, 2, 3))).isEqualTo(0);
+    }
+
+    @Test
+    void gapCount_slotsOneAndThree_returnsOne() {
+        assertThat(TimetableConstraintProvider.gapCount(List.of(1, 3))).isEqualTo(1);
+    }
+
+    @Test
+    void gapCount_slotsOneThreeSix_returnsThree() {
+        // sorted [1,3,6]: gap(3-1-1)=1 + gap(6-3-1)=2 = 3
+        assertThat(TimetableConstraintProvider.gapCount(List.of(1, 3, 6))).isEqualTo(3);
+    }
+
+    @Test
+    void gapCount_singleSlot_returnsZero() {
+        assertThat(TimetableConstraintProvider.gapCount(List.of(4))).isEqualTo(0);
     }
 }

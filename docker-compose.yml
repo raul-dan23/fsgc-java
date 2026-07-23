@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: orar
       POSTGRES_PASSWORD: orar
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - orar-pgdata:/var/lib/postgresql/data
     healthcheck:

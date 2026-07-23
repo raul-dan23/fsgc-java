@@ -34,7 +34,7 @@ import lombok.Setter;
  */
 @Entity
 @Table(name = "scheduled_activity")
-@PlanningEntity
+@PlanningEntity(difficultyComparatorClass = ro.uvt.fsgc.orar.solver.ActivityDifficultyComparator.class)
 @Getter
 @Setter
 @NoArgsConstructor

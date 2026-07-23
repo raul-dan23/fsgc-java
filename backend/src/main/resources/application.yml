@@ -2,7 +2,7 @@ spring:
   application:
     name: orar-backend
   datasource:
-    url: jdbc:postgresql://localhost:5432/orar
+    url: jdbc:postgresql://localhost:5433/orar
     username: orar
     password: orar
   jpa:

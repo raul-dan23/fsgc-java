@@ -8,6 +8,7 @@ import ai.timefold.solver.core.api.solver.SolverFactory;
 import ai.timefold.solver.core.api.solver.SolutionManager;
 import ai.timefold.solver.core.config.solver.SolverConfig;
 import ai.timefold.solver.core.config.solver.termination.TerminationConfig;
+import ro.uvt.fsgc.orar.solver.TimetableConstraintProvider;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -16,18 +17,15 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.Map;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
-import ro.uvt.fsgc.orar.domain.Room;
 import ro.uvt.fsgc.orar.domain.ScheduledActivity;
-import ro.uvt.fsgc.orar.domain.StudentGroup;
-import ro.uvt.fsgc.orar.domain.TimeSlot;
 import ro.uvt.fsgc.orar.dto.ActivityView;
 import ro.uvt.fsgc.orar.dto.CompareResultDto;
 import ro.uvt.fsgc.orar.dto.ConflictItem;
 import ro.uvt.fsgc.orar.dto.TimetableResultDto;
-import ro.uvt.fsgc.orar.solver.TimetableConstraintProvider;
 import ro.uvt.fsgc.orar.solver.TimetableSolution;
 
 /**
@@ -94,25 +92,37 @@ public class SolverService {
     // ------------------------------------------------------------- compare budgets
 
     public List<CompareResultDto> compare(List<Integer> budgets) {
-        List<CompareResultDto> rows = new ArrayList<>();
-        for (Integer b : budgets) {
-            int seconds = normalize(b);
-            TimetableSolution problem = data.loadProblem();
-            SolverFactory<TimetableSolution> factory = SolverFactory.create(buildConfig(seconds));
-            long start = System.currentTimeMillis();
-            TimetableSolution solved = factory.buildSolver().solve(problem);
-            long millis = System.currentTimeMillis() - start;
+        // Run each budget in parallel — they are fully independent (each loads its own problem snapshot).
+        List<Future<CompareResultDto>> futures = budgets.stream()
+                .map(b -> executor.submit(() -> runOneBudget(normalize(b))))
+                .toList();
 
-            HardMediumSoftScore score = solved.getScore();
-            SolutionManager<TimetableSolution, HardMediumSoftScore> sm = SolutionManager.create(factory);
-            int violatedHard = (int) sm.analyze(solved).constraintAnalyses().stream()
-                    .filter(ca -> ca.score().hardScore() < 0).count();
-            int unassigned = (int) solved.getActivities().stream()
-                    .filter(a -> a.getTimeSlot() == null || a.getRoom() == null).count();
-            rows.add(new CompareResultDto(seconds, millis, score.toString(),
-                    score.hardScore(), score.mediumScore(), score.softScore(), unassigned, violatedHard));
+        List<CompareResultDto> rows = new ArrayList<>();
+        for (Future<CompareResultDto> f : futures) {
+            try {
+                rows.add(f.get());
+            } catch (Exception e) {
+                throw new RuntimeException("Budget comparison failed", e);
+            }
         }
         return rows;
+    }
+
+    private CompareResultDto runOneBudget(int seconds) {
+        TimetableSolution problem = data.loadProblem();
+        SolverFactory<TimetableSolution> factory = SolverFactory.create(buildConfig(seconds));
+        long start = System.currentTimeMillis();
+        TimetableSolution solved = factory.buildSolver().solve(problem);
+        long millis = System.currentTimeMillis() - start;
+
+        HardMediumSoftScore score = solved.getScore();
+        SolutionManager<TimetableSolution, HardMediumSoftScore> sm = SolutionManager.create(factory);
+        int violatedHard = (int) sm.analyze(solved).constraintAnalyses().stream()
+                .filter(ca -> ca.score().hardScore() < 0).count();
+        int unassigned = (int) solved.getActivities().stream()
+                .filter(a -> a.getTimeSlot() == null || a.getRoom() == null).count();
+        return new CompareResultDto(seconds, millis, score.toString(),
+                score.hardScore(), score.mediumScore(), score.softScore(), unassigned, violatedHard);
     }
 
     // ------------------------------------------------------------- helpers
