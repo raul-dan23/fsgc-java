@@ -16,5 +16,26 @@ services:
       timeout: 5s
       retries: 5
 
+  backend:
+    build: ./backend
+    container_name: orar-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/orar
+      SPRING_DATASOURCE_USERNAME: orar
+      SPRING_DATASOURCE_PASSWORD: orar
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: orar-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
 volumes:
   orar-pgdata:
