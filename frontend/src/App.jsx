@@ -8,11 +8,15 @@ export default function App() {
   return (
     <div>
       <nav className="nav">
-        <span className="brand">Orar FSGC</span>
+        <span className="brand">
+          <span className="logo">◷</span>
+          <span>Orar&nbsp;FSGC<br /><span className="sub">Generator orar</span></span>
+        </span>
         <NavLink to="/import">Import</NavLink>
         <NavLink to="/constraints">Constrângeri</NavLink>
         <NavLink to="/generate">Generare</NavLink>
         <NavLink to="/timetable">Orar</NavLink>
+        <span className="spacer" />
       </nav>
       <div className="container">
         <Routes>
