@@ -60,9 +60,20 @@ public class Room {
     @Column(name = "equipment")
     private Set<String> equipment = new HashSet<>();
 
-    /** Non-uniform per-day availability windows. */
+    /** Non-uniform per-day availability windows, as recorded by the Excel import. */
     @OneToMany(mappedBy = "room", cascade = jakarta.persistence.CascadeType.ALL, orphanRemoval = true)
     private List<RoomAvailability> availabilities = new ArrayList<>();
+
+    /**
+     * Windows in which the room may NOT be used. This is what the solver reads: a room with no
+     * rows here is usable on every module. A Set (not a List) so Hibernate does not see two
+     * eager bags on this entity.
+     */
+    // No cascade/orphanRemoval on purpose: with both collections eager, a cascade here re-saved
+    // a child that had just been deleted through its own repository. Rows are removed by the
+    // DB-level ON DELETE CASCADE when the room itself goes.
+    @OneToMany(mappedBy = "room", fetch = FetchType.EAGER)
+    private Set<RoomUnavailability> unavailabilities = new HashSet<>();
 
     @Column(name = "usage_restrictions")
     private String usageRestrictions;
