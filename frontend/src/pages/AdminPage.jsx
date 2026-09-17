@@ -52,6 +52,13 @@ export default function AdminPage() {
           Modificările se aplică direct în baza de date. După ce schimbi date care afectează orarul
           (grupe, activități, săli), regenerează orarul din <b>Generare</b>.
         </p>
+        {tab === 'rooms' && (
+          <p className="muted" style={{ marginBottom: 0, marginTop: 8 }}>
+            O sală nouă e liberă în toate cele 40 de intervale — nu trebuie să declari când e
+            disponibilă. Dacă e ocupată în anumite intervale, adaugă o <b>indisponibilitate de
+            sală</b> în <b>Constrângeri</b>.
+          </p>
+        )}
       </div>
 
       <div className="panel">
@@ -136,8 +143,16 @@ function buildTabs({ subjects, professors, groups }) {
         { key: 'department', label: 'Departament', type: 'text', width: 110 },
         { key: 'usageRestrictions', label: 'Restricții', type: 'text', width: 160 },
         {
-          key: 'availabilities', label: 'Zile disp.', readOnly: true, width: 90,
-          render: (r) => (r.availabilities ? r.availabilities.length : 0),
+          // A room is usable in all 40 slots by default; only the exceptions are stored. Showing a
+          // count of "available days" read 0 for every room created here and suggested the
+          // opposite of the truth, so show the exceptions instead.
+          key: 'unavailabilities', label: 'Indisponibilă', readOnly: true, width: 150,
+          render: (r) => {
+            const n = r.unavailabilities ? r.unavailabilities.length : 0;
+            return n === 0
+              ? <span className="muted">mereu liberă</span>
+              : `${n} ${n === 1 ? 'interval' : 'intervale'}`;
+          },
         },
       ],
     },
