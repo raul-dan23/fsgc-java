@@ -54,6 +54,7 @@ public class TimetableConstraintProvider implements ConstraintProvider {
                 globalWeeklyBalance(f),
                 professorPreference(f),
                 parityPairTogether(f),
+                roomOversize(f),
         };
     }
 
@@ -304,7 +305,31 @@ public class TimetableConstraintProvider implements ConstraintProvider {
                 .asConstraint(PARITY_PAIR_TOGETHER);
     }
 
+    /**
+     * S8. Prefer the smallest room that fits: penalize every empty seat. A 27-student seminar in
+     * a 150-seat amphitheatre wastes 123 seats and costs far more than the same seminar in a
+     * 40-seat room (13), so the solver drifts towards right-sized rooms and leaves the two
+     * amphitheatres for the trunchi-comun courses that genuinely need them.
+     *
+     * <p>Deliberately soft, not hard: some seminars really are attended by 49-63 students and no
+     * seminar room holds more than 40, so a hard rule would leave them unplaceable. Activities
+     * that require an amphitheatre are skipped — their waste is unavoidable, and scoring it would
+     * only add a constant the solver cannot act on.
+     */
+    Constraint roomOversize(ConstraintFactory f) {
+        return f.forEach(ScheduledActivity.class)
+                .filter(a -> !a.isRequiresAmphitheater())
+                .penalizeConfigurable(TimetableConstraintProvider::wastedSeats)
+                .asConstraint(ROOM_OVERSIZE);
+    }
+
     // =========================================================== helpers
+
+    /** Empty seats left by an activity, never negative (capacity shortfall is a hard constraint). */
+    static int wastedSeats(ScheduledActivity a) {
+        return Math.max(0, a.getRoom().getCapacity() - a.totalStudentCount());
+    }
+
 
     /** 0 when both halves share slot and room, up to 3 when they share neither. */
     static int pairSeparation(ScheduledActivity a, ScheduledActivity b) {

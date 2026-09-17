@@ -8,7 +8,7 @@ import ai.timefold.solver.core.api.score.buildin.hardmediumsoft.HardMediumSoftSc
  * Weights for EVERY constraint. Timefold requires that, when a constraint configuration is used,
  * every constraint in the {@link TimetableConstraintProvider} has a matching {@code @ConstraintWeight}.
  * Hard constraints are fixed at 1 hard (non-negotiable), the unassigned penalty at 1 medium, and the
- * seven quality constraints carry tunable soft weights mirrored from the {@code constraint_weights} DB row.
+ * eight quality constraints carry tunable soft weights mirrored from the {@code constraint_weights} DB row.
  */
 @ConstraintConfiguration(constraintPackage = "ro.uvt.fsgc.orar.solver")
 public class TimetableConstraintConfiguration {
@@ -37,6 +37,7 @@ public class TimetableConstraintConfiguration {
     public static final String GLOBAL_WEEKLY_BALANCE = "Faculty-wide weekly balance";
     public static final String PROFESSOR_PREFERENCE = "Honor professor time preferences";
     public static final String PARITY_PAIR_TOGETHER = "Alternating halves share slot and room";
+    public static final String ROOM_OVERSIZE = "Prefer the smallest adequate room";
 
     // ---- hard weights (fixed) ----
     @ConstraintWeight(NO_PROFESSOR_OVERLAP)
@@ -85,6 +86,8 @@ public class TimetableConstraintConfiguration {
     private HardMediumSoftScore professorPreference = HardMediumSoftScore.ofSoft(5);
     @ConstraintWeight(PARITY_PAIR_TOGETHER)
     private HardMediumSoftScore parityPairTogether = HardMediumSoftScore.ofSoft(50);
+    @ConstraintWeight(ROOM_OVERSIZE)
+    private HardMediumSoftScore roomOversize = HardMediumSoftScore.ofSoft(2);
 
     // Hard/medium getters are required by Timefold to read the weights.
     public HardMediumSoftScore getNoProfessorOverlap() { return noProfessorOverlap; }
@@ -116,4 +119,6 @@ public class TimetableConstraintConfiguration {
     public void setProfessorPreference(HardMediumSoftScore v) { this.professorPreference = v; }
     public HardMediumSoftScore getParityPairTogether() { return parityPairTogether; }
     public void setParityPairTogether(HardMediumSoftScore v) { this.parityPairTogether = v; }
+    public HardMediumSoftScore getRoomOversize() { return roomOversize; }
+    public void setRoomOversize(HardMediumSoftScore v) { this.roomOversize = v; }
 }

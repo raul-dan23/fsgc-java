@@ -41,6 +41,7 @@ public class WeightsController {
         w.setGlobalWeeklyBalance(incoming.getGlobalWeeklyBalance());
         w.setProfessorPreference(incoming.getProfessorPreference());
         w.setParityPairTogether(incoming.getParityPairTogether());
+        w.setRoomOversize(incoming.getRoomOversize());
         return ResponseEntity.ok(repo.save(w));
     }
 }

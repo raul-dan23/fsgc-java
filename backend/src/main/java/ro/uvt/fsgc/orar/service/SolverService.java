@@ -261,6 +261,13 @@ public class SolverService {
                     "Nu blochează orarul, dar se citește mai greu. Scade ponderea"
                             + " „Ore alternative SI/SP în același interval” din Constrângeri"
                             + " dacă preferi libertate mai mare la plasare."};
+            case "Prefer the smallest adequate room" -> new String[] {
+                    "Sala pe măsura grupei",
+                    "Unele ore au primit o sală mult mai mare decât e nevoie"
+                            + " (de exemplu un seminar într-un amfiteatru).",
+                    "Dacă persistă, de obicei numărul de studenți e umflat: verifică în Administrare"
+                            + " dacă activitatea are grupe adăugate de două ori (secția întreagă plus"
+                            + " o subgrupă a ei)."};
             default -> new String[] {
                     constraint,
                     "Regula „" + constraint + "” nu a putut fi respectată complet.",

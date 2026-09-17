@@ -22,6 +22,7 @@ const WEIGHT_FIELDS = [
   ['globalWeeklyBalance', 'Echilibrarea pe întreaga săptămână'],
   ['professorPreference', 'Preferințele cadrelor didactice'],
   ['parityPairTogether', 'Ore alternative SI/SP în același interval'],
+  ['roomOversize', 'Sală pe măsura grupei (penalizează locurile goale)'],
 ];
 
 /** "08:00:00" -> "08:00" */

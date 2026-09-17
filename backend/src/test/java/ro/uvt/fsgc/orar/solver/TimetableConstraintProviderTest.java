@@ -395,4 +395,55 @@ class TimetableConstraintProviderTest {
                 .given(first[0], first[1], second[0], second[1])
                 .penalizesBy(0);
     }
+
+    // ----- room right-sizing tests -----
+
+    @Test
+    void roomOversize_penalizesEmptySeats() {
+        StudentGroup g = group("RISE1 - Grupa 1", "RISE", 1, StudyProgram.LICENSE, 27);
+        // 27 students in a 150-seat amphitheatre: 123 empty seats.
+        verifier.verifyThat(TimetableConstraintProvider::roomOversize)
+                .given(activity(prof("X"), ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 1),
+                        room("A03", 150, RoomTypology.AMPHITHEATER, null), WeekParity.EVERY_WEEK, g))
+                .penalizesBy(123);
+    }
+
+    @Test
+    void roomOversize_rightSizedRoomCostsFarLess() {
+        StudentGroup g = group("RISE1 - Grupa 1", "RISE", 1, StudyProgram.LICENSE, 27);
+        // The same seminar in a 40-seat room: 13 empty seats, so the small room clearly wins.
+        verifier.verifyThat(TimetableConstraintProvider::roomOversize)
+                .given(activity(prof("X"), ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 1),
+                        room("128", 40, RoomTypology.SEMINAR, null), WeekParity.EVERY_WEEK, g))
+                .penalizesBy(13);
+    }
+
+    @Test
+    void roomOversize_skipsActivitiesThatRequireAnAmphitheater() {
+        StudentGroup g = group("RISE3", "RISE", 3, StudyProgram.LICENSE, 47);
+        ScheduledActivity a = activity(prof("X"), ActivityType.COURSE, slot(DayOfWeek.MONDAY, 1),
+                room("A03", 150, RoomTypology.AMPHITHEATER, null), WeekParity.EVERY_WEEK, g);
+        a.setRequiresAmphitheater(true);
+        // Its waste is unavoidable, so scoring it would only add a constant.
+        verifier.verifyThat(TimetableConstraintProvider::roomOversize).given(a).penalizesBy(0);
+    }
+
+    @Test
+    void roomOversize_neverNegativeWhenRoomIsTooSmall() {
+        StudentGroup g = group("Big", "X", 1, StudyProgram.LICENSE, 60);
+        // Overfull is the hard capacity constraint's business; this one must not reward it.
+        verifier.verifyThat(TimetableConstraintProvider::roomOversize)
+                .given(activity(prof("X"), ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 1),
+                        room("128", 40, RoomTypology.SEMINAR, null), WeekParity.EVERY_WEEK, g))
+                .penalizesBy(0);
+    }
+
+    @Test
+    void roomOversize_exactFitIsFree() {
+        StudentGroup g = group("Exact", "X", 1, StudyProgram.LICENSE, 40);
+        verifier.verifyThat(TimetableConstraintProvider::roomOversize)
+                .given(activity(prof("X"), ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 1),
+                        room("128", 40, RoomTypology.SEMINAR, null), WeekParity.EVERY_WEEK, g))
+                .penalizesBy(0);
+    }
 }

@@ -55,4 +55,11 @@ public class ConstraintWeights {
      */
     @Column(name = "parity_pair_together", nullable = false)
     private int parityPairTogether = 50;
+
+    /**
+     * Penalty per empty seat, steering each activity towards the smallest room that fits so the
+     * amphitheatres stay free for the courses that need them.
+     */
+    @Column(name = "room_oversize", nullable = false)
+    private int roomOversize = 2;
 }
