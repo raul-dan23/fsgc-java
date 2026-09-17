@@ -73,11 +73,13 @@ public class ScheduleService {
             violations.add("Room capacity exceeded (" + activity.totalStudentCount()
                     + " > " + room.getCapacity() + ")");
         }
-        boolean covered = room.getAvailabilities().stream().anyMatch(av ->
-                av.covers(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime()));
-        if (!covered) {
-            violations.add("Room not available in this slot");
-        }
+        // Same rule the solver uses: rooms are free unless an unavailability window overlaps.
+        room.getUnavailabilities().stream()
+                .filter(un -> un.overlaps(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime()))
+                .findFirst()
+                .ifPresent(un -> violations.add("Sala este indisponibilă în acest interval ("
+                        + un.getStartTime() + "–" + un.getEndTime()
+                        + (un.getReason() == null ? "" : ", " + un.getReason()) + ")"));
         if (activity.isMaster() && !ts.isEveningModule()) {
             violations.add("Master activity outside evening modules (6-8)");
         }

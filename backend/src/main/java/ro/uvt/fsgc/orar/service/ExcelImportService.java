@@ -37,6 +37,7 @@ import ro.uvt.fsgc.orar.repository.ScheduledActivityRepository;
 import ro.uvt.fsgc.orar.repository.SpecialBlockRuleRepository;
 import ro.uvt.fsgc.orar.repository.StudentGroupRepository;
 import ro.uvt.fsgc.orar.repository.SubjectRepository;
+import ro.uvt.fsgc.orar.repository.TimeSlotRepository;
 
 /**
  * Parses the 4-sheet import workbook (Sectii, Profesori, Sali, Discipline) with Apache POI,
@@ -61,6 +62,7 @@ public class ExcelImportService {
     private final ProfessorUnavailabilityRepository profUnavailRepo;
     private final ProfessorRoomRestrictionRepository profRoomRepo;
     private final BlockedDayRuleRepository blockedDayRepo;
+    private final TimeSlotRepository timeSlotRepo;
 
     public ExcelImportService(StudentGroupRepository groupRepo, ProfessorRepository professorRepo,
                               RoomRepository roomRepo, SubjectRepository subjectRepo,
@@ -68,7 +70,8 @@ public class ExcelImportService {
                               SpecialBlockRuleRepository specialBlockRepo,
                               ProfessorUnavailabilityRepository profUnavailRepo,
                               ProfessorRoomRestrictionRepository profRoomRepo,
-                              BlockedDayRuleRepository blockedDayRepo) {
+                              BlockedDayRuleRepository blockedDayRepo,
+                              TimeSlotRepository timeSlotRepo) {
         this.groupRepo = groupRepo;
         this.professorRepo = professorRepo;
         this.roomRepo = roomRepo;
@@ -79,6 +82,7 @@ public class ExcelImportService {
         this.profUnavailRepo = profUnavailRepo;
         this.profRoomRepo = profRoomRepo;
         this.blockedDayRepo = blockedDayRepo;
+        this.timeSlotRepo = timeSlotRepo;
     }
 
     /** Thrown to trigger transaction rollback while carrying the partial result with errors. */
@@ -148,7 +152,8 @@ public class ExcelImportService {
         profRoomRepo.deleteAllInBatch();
         blockedDayRepo.deleteAllInBatch();
         // Bulk delete issues immediate SQL (before the new inserts flush); the DB-level
-        // ON DELETE CASCADE on room_availability/room_equipment removes the children.
+        // ON DELETE CASCADE on room_availability/room_equipment/room_unavailability removes the
+        // children -- note this also clears manually configured room unavailabilities.
         roomRepo.deleteAllInBatch();
         subjectRepo.deleteAllInBatch();
         groupRepo.deleteAllInBatch();
@@ -285,15 +290,13 @@ public class ExcelImportService {
             room.setTypology(RoomTypology.fromExcel(ExcelCells.str(row, 4)));
             room.setUsageRestrictions(ExcelCells.str(row, 8));
 
+            // Rooms are available for the whole teaching day by default; the Excel's
+            // available_from/available_until are no longer applied, because narrowing them here
+            // silently hid the last module (the file says 20:00, module 8 ends at 21:10).
+            // Exceptions are recorded as room unavailabilities in Constrangeri instead.
             List<DayOfWeek> days = parseDays(ExcelCells.str(row, 5));
-            LocalTime from = ExcelCells.time(row, 6);
-            LocalTime until = ExcelCells.time(row, 7);
-            if (from == null) {
-                from = LocalTime.of(8, 0);
-            }
-            if (until == null) {
-                until = LocalTime.of(21, 10);
-            }
+            LocalTime from = teachingDayStart();
+            LocalTime until = teachingDayEnd();
             for (DayOfWeek d : days) {
                 room.getAvailabilities().add(new RoomAvailability(room, d, from, until));
                 avail++;
@@ -455,6 +458,22 @@ public class ExcelImportService {
         byName.put(token, g);
         bySpecYear.computeIfAbsent(specYearKey, k -> new ArrayList<>()).add(g);
         return g;
+    }
+
+    /** Start of the first module, read from the seeded grid rather than hard-coded. */
+    private LocalTime teachingDayStart() {
+        return timeSlotRepo.findAll().stream()
+                .map(ro.uvt.fsgc.orar.domain.TimeSlot::getStartTime)
+                .min(LocalTime::compareTo)
+                .orElse(LocalTime.of(8, 0));
+    }
+
+    /** End of the last module, read from the seeded grid rather than hard-coded. */
+    private LocalTime teachingDayEnd() {
+        return timeSlotRepo.findAll().stream()
+                .map(ro.uvt.fsgc.orar.domain.TimeSlot::getEndTime)
+                .max(LocalTime::compareTo)
+                .orElse(LocalTime.of(21, 10));
     }
 
     /** Maps Romanian day abbreviations "L,M,Mi,J,V" to DayOfWeek. */

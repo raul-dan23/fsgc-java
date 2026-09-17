@@ -17,6 +17,7 @@ import ro.uvt.fsgc.orar.domain.ProfessorRoomRestriction;
 import ro.uvt.fsgc.orar.domain.ProfessorUnavailability;
 import ro.uvt.fsgc.orar.domain.RestrictionType;
 import ro.uvt.fsgc.orar.domain.RoomAvailability;
+import ro.uvt.fsgc.orar.domain.RoomUnavailability;
 import ro.uvt.fsgc.orar.domain.SpecialBlockRule;
 import ro.uvt.fsgc.orar.domain.SpecialCategory;
 import ro.uvt.fsgc.orar.domain.StudyProgram;
@@ -26,6 +27,7 @@ import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorUnavailabilityRepository;
 import ro.uvt.fsgc.orar.repository.RoomAvailabilityRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
+import ro.uvt.fsgc.orar.repository.RoomUnavailabilityRepository;
 import ro.uvt.fsgc.orar.repository.SpecialBlockRuleRepository;
 import ro.uvt.fsgc.orar.repository.StudentGroupRepository;
 import ro.uvt.fsgc.orar.repository.TimeSlotRepository;
@@ -45,6 +47,7 @@ public class RulesController {
     private final ProfessorUnavailabilityRepository profUnavailRepo;
     private final ProfessorRoomRestrictionRepository profRoomRepo;
     private final RoomAvailabilityRepository roomAvailRepo;
+    private final RoomUnavailabilityRepository roomUnavailRepo;
     private final ProfessorRepository professorRepo;
     private final RoomRepository roomRepo;
     private final StudentGroupRepository groupRepo;
@@ -53,7 +56,8 @@ public class RulesController {
     public RulesController(BlockedDayRuleRepository blockedDayRepo, SpecialBlockRuleRepository specialBlockRepo,
                           ProfessorUnavailabilityRepository profUnavailRepo,
                           ProfessorRoomRestrictionRepository profRoomRepo,
-                          RoomAvailabilityRepository roomAvailRepo, ProfessorRepository professorRepo,
+                          RoomAvailabilityRepository roomAvailRepo,
+                          RoomUnavailabilityRepository roomUnavailRepo, ProfessorRepository professorRepo,
                           RoomRepository roomRepo, StudentGroupRepository groupRepo,
                           TimeSlotRepository timeSlotRepo) {
         this.blockedDayRepo = blockedDayRepo;
@@ -61,6 +65,7 @@ public class RulesController {
         this.profUnavailRepo = profUnavailRepo;
         this.profRoomRepo = profRoomRepo;
         this.roomAvailRepo = roomAvailRepo;
+        this.roomUnavailRepo = roomUnavailRepo;
         this.professorRepo = professorRepo;
         this.roomRepo = roomRepo;
         this.groupRepo = groupRepo;
@@ -203,6 +208,64 @@ public class RulesController {
     @DeleteMapping("/room-availabilities/{id}")
     public ResponseEntity<Void> deleteRoomAvail(@PathVariable Long id) {
         roomAvailRepo.deleteById(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ---------------- room unavailability ----------------
+
+    /** Carries the room name, so the UI never has to render a bare id. */
+    public record RoomUnavailView(Long id, Long roomId, String roomName, String dayOfWeek,
+                                  String startTime, String endTime, String reason) {
+    }
+
+    private static RoomUnavailView view(RoomUnavailability u) {
+        return new RoomUnavailView(u.getId(), u.getRoom().getId(), u.getRoom().getName(),
+                u.getDayOfWeek().name(), u.getStartTime().toString(), u.getEndTime().toString(),
+                u.getReason());
+    }
+
+    public record RoomUnavailReq(Long roomId, DayOfWeek dayOfWeek, LocalTime startTime,
+                                 LocalTime endTime, String reason) {
+    }
+
+    @GetMapping("/room-unavailabilities")
+    public List<RoomUnavailView> roomUnavailabilities() {
+        return roomUnavailRepo.findAll().stream()
+                .sorted((a, b) -> {
+                    int c = a.getRoom().getName().compareToIgnoreCase(b.getRoom().getName());
+                    if (c != 0) {
+                        return c;
+                    }
+                    c = a.getDayOfWeek().compareTo(b.getDayOfWeek());
+                    return c != 0 ? c : a.getStartTime().compareTo(b.getStartTime());
+                })
+                .map(RulesController::view)
+                .toList();
+    }
+
+    @PostMapping("/room-unavailabilities")
+    public ResponseEntity<?> addRoomUnavail(@RequestBody RoomUnavailReq req) {
+        if (req.roomId() == null || req.dayOfWeek() == null
+                || req.startTime() == null || req.endTime() == null) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("message",
+                    "Sala, ziua, ora de început și ora de sfârșit sunt obligatorii."));
+        }
+        if (!req.startTime().isBefore(req.endTime())) {
+            return ResponseEntity.badRequest().body(java.util.Map.of("message",
+                    "Ora de început trebuie să fie înaintea orei de sfârșit."));
+        }
+        RoomUnavailability u = new RoomUnavailability();
+        u.setRoom(roomRepo.findById(req.roomId()).orElseThrow());
+        u.setDayOfWeek(req.dayOfWeek());
+        u.setStartTime(req.startTime());
+        u.setEndTime(req.endTime());
+        u.setReason(req.reason() == null || req.reason().isBlank() ? null : req.reason().trim());
+        return ResponseEntity.ok(view(roomUnavailRepo.save(u)));
+    }
+
+    @DeleteMapping("/room-unavailabilities/{id}")
+    public ResponseEntity<Void> deleteRoomUnavail(@PathVariable Long id) {
+        roomUnavailRepo.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 }

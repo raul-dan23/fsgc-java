@@ -76,7 +76,7 @@ public class TimetableDataService {
             a.setRoom(null);
         });
         s.getRooms().forEach(r -> {
-            r.getAvailabilities().size();
+            r.getUnavailabilities().size();
             r.getEquipment().size();
         });
 

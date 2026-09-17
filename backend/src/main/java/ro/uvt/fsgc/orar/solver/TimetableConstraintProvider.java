@@ -38,7 +38,7 @@ public class TimetableConstraintProvider implements ConstraintProvider {
                 noStudentGroupOverlap(f),
                 roomCapacity(f),
                 roomTypeMatchesActivity(f),
-                roomAvailability(f),
+                roomUnavailability(f),
                 masterEveningOnly(f),
                 blockedDayForTerminalYear(f),
                 specialCategoryBlock(f),
@@ -105,11 +105,15 @@ public class TimetableConstraintProvider implements ConstraintProvider {
                 .asConstraint(AMPHITHEATER_REQUIRED);
     }
 
-    /** 6. The activity's slot must fall inside one of the room's availability windows. */
-    Constraint roomAvailability(ConstraintFactory f) {
+    /**
+     * 6. The activity's slot must not overlap any window in which the room is marked unavailable.
+     * Rooms are usable by default, so only the exceptions are stored. The constraint's public
+     * name stays ROOM_AVAILABILITY so previously saved weights keep applying.
+     */
+    Constraint roomUnavailability(ConstraintFactory f) {
         return f.forEach(ScheduledActivity.class)
-                .filter(a -> a.getRoom().getAvailabilities().stream().noneMatch(av ->
-                        av.covers(a.getTimeSlot().getDayOfWeek(),
+                .filter(a -> a.getRoom().getUnavailabilities().stream().anyMatch(un ->
+                        un.overlaps(a.getTimeSlot().getDayOfWeek(),
                                 a.getTimeSlot().getStartTime(), a.getTimeSlot().getEndTime())))
                 .penalizeConfigurable()
                 .asConstraint(ROOM_AVAILABILITY);
