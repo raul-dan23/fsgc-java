@@ -4,6 +4,12 @@ import { api } from '../api/client.js';
 const PROGRAMS = [['LICENSE', 'Licență'], ['MASTER', 'Master']];
 const TYPOLOGIES = [['SEMINAR', 'Seminar'], ['COURSE', 'Curs'], ['LAB', 'Laborator'], ['AMPHITHEATER', 'Amfiteatru']];
 const ACT_TYPES = [['COURSE', 'Curs'], ['SEMINAR', 'Seminar'], ['LAB', 'Laborator']];
+/**
+ * Tabs that can be wiped in one go. Rooms are absent on purpose: deleting them would take their
+ * unavailability windows with them (the database cascades), and those are entered by hand.
+ */
+const BULK_DELETABLE = ['activities', 'subjects', 'groups', 'professors'];
+
 const PARITIES = [['EVERY_WEEK', 'Săptămânal'], ['ODD_WEEKS', 'Săpt. impare (SI)'], ['EVEN_WEEKS', 'Săpt. pare (SP)']];
 const CATEGORIES = [['NORMAL', 'Normal'], ['DCT', 'DCT'], ['DPPD', 'DPPD'], ['CCOC', 'CCOC'], ['LIMBI_STRAINE', 'Limbi străine']];
 
@@ -291,6 +297,37 @@ function EntityTable({ tab, onChanged }) {
     }
   }
 
+  /**
+   * Wipes the whole tab. Typing the count is deliberate friction: this removes every row at once
+   * and cannot be undone, and a stray click on a 260-row table is not recoverable.
+   */
+  async function removeAll() {
+    const n = rows ? rows.length : 0;
+    if (n === 0) return;
+    const answer = window.prompt(
+      `Ștergi TOATE cele ${n} rânduri din „${tab.label}”?\n\n`
+      + 'Acțiunea nu poate fi anulată. Sălile și indisponibilitățile lor NU sunt atinse.\n\n'
+      + `Scrie ${n} ca să confirmi:`);
+    if (answer === null) return;
+    if (answer.trim() !== String(n)) {
+      setError('Anulat — numărul scris nu corespunde.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.adminDeleteAll(tab.kind);
+      setNotice((res && res.message) || 'Șters.');
+      reload();
+      onChanged();
+      setTimeout(() => setNotice(null), 5000);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const filtered = useMemo(() => {
     if (!rows) return [];
     const needle = q.trim().toLowerCase();
@@ -308,6 +345,11 @@ function EntityTable({ tab, onChanged }) {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="filtrează…" style={{ width: 240 }} />
         </div>
         <button onClick={startCreate} disabled={creating}>+ Adaugă</button>
+        {BULK_DELETABLE.includes(tab.kind) && (
+          <button className="danger" onClick={removeAll} disabled={busy || rows.length === 0}>
+            Șterge tot ({rows.length})
+          </button>
+        )}
         <span className="spacer" style={{ flex: 1 }} />
         <span className="muted">{filtered.length} / {rows.length} rânduri</span>
       </div>

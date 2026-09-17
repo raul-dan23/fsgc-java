@@ -30,6 +30,7 @@ import ro.uvt.fsgc.orar.domain.StudyProgram;
 import ro.uvt.fsgc.orar.domain.Subject;
 import ro.uvt.fsgc.orar.domain.WeekParity;
 import ro.uvt.fsgc.orar.repository.ProfessorRepository;
+import ro.uvt.fsgc.orar.repository.SpecialBlockRuleRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
 import ro.uvt.fsgc.orar.repository.ScheduledActivityRepository;
 import ro.uvt.fsgc.orar.repository.StudentGroupRepository;
@@ -54,15 +55,18 @@ public class AdminController {
     private final StudentGroupRepository groupRepo;
     private final SubjectRepository subjectRepo;
     private final ScheduledActivityRepository activityRepo;
+    private final SpecialBlockRuleRepository specialBlockRepo;
 
     public AdminController(ProfessorRepository professorRepo, RoomRepository roomRepo,
                            StudentGroupRepository groupRepo, SubjectRepository subjectRepo,
-                           ScheduledActivityRepository activityRepo) {
+                           ScheduledActivityRepository activityRepo,
+                           SpecialBlockRuleRepository specialBlockRepo) {
         this.professorRepo = professorRepo;
         this.roomRepo = roomRepo;
         this.groupRepo = groupRepo;
         this.subjectRepo = subjectRepo;
         this.activityRepo = activityRepo;
+        this.specialBlockRepo = specialBlockRepo;
     }
 
     /** Signals a refused write (missing row, blocking reference, duplicate key) as HTTP 409. */
@@ -393,6 +397,80 @@ public class AdminController {
                 .orElseThrow(() -> new ConflictException("Activitatea nu există (id " + id + ")"));
         activityRepo.delete(a);
         return ResponseEntity.noContent().build();
+    }
+
+    // ------------------------------------------------------------------ bulk delete
+
+    /** How many rows a "delete everything of this kind" call removed. */
+    public record BulkDeleteResult(int deleted, String message) {
+    }
+
+    /**
+     * Wipes every activity. Nothing else points at an activity except the join table, which is
+     * removed by the database, so this always succeeds — and it is what unblocks deleting the
+     * subjects, groups and professors the activities refer to.
+     */
+    @DeleteMapping("/activities")
+    @Transactional
+    public BulkDeleteResult deleteAllActivities() {
+        int n = (int) activityRepo.count();
+        activityRepo.deleteAllInBatch();
+        return new BulkDeleteResult(n, n + (n == 1 ? " activitate ștearsă." : " activități șterse."));
+    }
+
+    @DeleteMapping("/subjects")
+    @Transactional
+    public BulkDeleteResult deleteAllSubjects() {
+        requireNoActivities("disciplinele");
+        int n = (int) subjectRepo.count();
+        subjectRepo.deleteAllInBatch();
+        return new BulkDeleteResult(n, n + (n == 1 ? " disciplină ștearsă." : " discipline șterse."));
+    }
+
+    /**
+     * Groups are also referenced by special block rules, and that reference is not removed by the
+     * database, so it is reported instead of being silently dropped — a blocked interval that
+     * quietly loses its audience would change what the rule means.
+     */
+    @DeleteMapping("/groups")
+    @Transactional
+    public BulkDeleteResult deleteAllGroups() {
+        requireNoActivities("grupele");
+        long blocks = specialBlockRepo.findAll().stream()
+                .filter(r -> r.getStudentGroup() != null)
+                .count();
+        if (blocks > 0) {
+            throw new ConflictException("Există " + blocks + " blocaje speciale legate de o grupă."
+                    + " Șterge-le din Constrângeri întâi, ca să nu rămână reguli fără audiență.");
+        }
+        int n = (int) groupRepo.count();
+        groupRepo.deleteAllInBatch();
+        return new BulkDeleteResult(n, n + (n == 1 ? " grupă ștearsă." : " grupe șterse."));
+    }
+
+    /**
+     * Deleting professors also drops their unavailabilities and room restrictions, which the
+     * database removes for us; the message says so, because those are rules the user entered by
+     * hand and losing them silently would be a surprise.
+     */
+    @DeleteMapping("/professors")
+    @Transactional
+    public BulkDeleteResult deleteAllProfessors() {
+        requireNoActivities("profesorii");
+        int n = (int) professorRepo.count();
+        professorRepo.deleteAllInBatch();
+        return new BulkDeleteResult(n, n + (n == 1 ? " profesor șters" : " profesori șterși")
+                + ", împreună cu indisponibilitățile și restricțiile lor de sală.");
+    }
+
+    /** Subjects, groups and professors are all referenced by activities, so those go first. */
+    private void requireNoActivities(String what) {
+        long n = activityRepo.count();
+        if (n > 0) {
+            throw new ConflictException("Nu pot șterge " + what + " cât timp există " + n
+                    + (n == 1 ? " activitate care le folosește." : " activități care le folosesc.")
+                    + " Șterge întâi activitățile.");
+        }
     }
 
     // ------------------------------------------------------------------ helpers

@@ -106,6 +106,15 @@ export const api = {
   async adminDelete(kind, id) {
     await json(await fetch(`/api/admin/${kind}/${id}`, { method: 'DELETE' }));
   },
+  /** Wipes every row of one kind. Rooms are deliberately not deletable in bulk. */
+  async adminDeleteAll(kind) {
+    const res = await fetch(`/api/admin/${kind}`, { method: 'DELETE' });
+    const { ok, body } = await json(res);
+    if (!ok) {
+      throw new Error((body && body.message) || 'Ștergerea a eșuat.');
+    }
+    return body;
+  },
 
   // --- orare salvate (istoric) ---
   async savedTimetables() {
