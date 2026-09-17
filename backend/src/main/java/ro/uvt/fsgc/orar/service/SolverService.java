@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.Map;
@@ -46,6 +47,8 @@ public class SolverService {
     private final ExecutorService executor = Executors.newFixedThreadPool(
             Math.max(1, Runtime.getRuntime().availableProcessors() / 2));
     private final Map<String, TimetableResultDto> jobs = new ConcurrentHashMap<>();
+    /** The solve currently running, if any. Guards against several solves racing to persist. */
+    private final AtomicReference<String> activeJob = new AtomicReference<>();
 
     public SolverService(TimetableDataService data) {
         this.data = data;
@@ -53,17 +56,41 @@ public class SolverService {
 
     // ------------------------------------------------------------- async generate
 
-    public String startGenerate(Integer terminationSeconds) {
+    /** A started (or already-running) solve. */
+    public record GenerateStart(String jobId, boolean alreadyRunning) {
+    }
+
+    /**
+     * Starts a solve, unless one is already running. Two concurrent solves would both write the
+     * whole timetable back at the end, so the later finisher silently overwrote the other — and
+     * the UI could end up showing a result that no longer matched the database.
+     */
+    public GenerateStart startGenerate(Integer terminationSeconds) {
+        String running = activeJob.get();
+        if (running != null) {
+            TimetableResultDto existing = jobs.get(running);
+            if (existing != null && "SOLVING".equals(existing.getState())) {
+                return new GenerateStart(running, true);
+            }
+            activeJob.compareAndSet(running, null);
+        }
+
         int seconds = normalize(terminationSeconds);
         String jobId = UUID.randomUUID().toString();
         TimetableResultDto job = new TimetableResultDto();
         job.setJobId(jobId);
         job.setState("SOLVING");
         jobs.put(jobId, job);
+        if (!activeJob.compareAndSet(null, jobId)) {
+            // someone won the race in between; hand back their job instead of starting a second
+            jobs.remove(jobId);
+            String winner = activeJob.get();
+            return new GenerateStart(winner, true);
+        }
 
         TimetableSolution problem = data.loadProblem();
         executor.submit(() -> runSolve(jobId, problem, seconds));
-        return jobId;
+        return new GenerateStart(jobId, false);
     }
 
     public TimetableResultDto getJob(String jobId) {
@@ -88,6 +115,8 @@ public class SolverService {
         } catch (Exception e) {
             job.setState("FAILED");
             job.setError(e.getMessage());
+        } finally {
+            activeJob.compareAndSet(jobId, null);
         }
     }
 
@@ -155,29 +184,80 @@ public class SolverService {
                 continue; // only report things that hurt feasibility / placement
             }
             String severity = s.hardScore() < 0 ? "HARD" : "PLACEMENT";
-            conflicts.add(new ConflictItem(ca.constraintName(), severity, ca.matchCount(),
-                    suggestionFor(ca.constraintName(), ca.matchCount())));
+            String[] text = describe(ca.constraintName(), ca.matchCount());
+            conflicts.add(new ConflictItem(ca.constraintName(), text[0], severity,
+                    ca.matchCount(), text[1], text[2]));
         }
         return conflicts;
     }
 
-    private String suggestionFor(String constraint, int matches) {
+    /**
+     * Romanian {name, meaning, advice} for a constraint. The audience is a staff member who has
+     * never heard of a solver, so the wording avoids scores, weights and "constraints".
+     */
+    String[] describe(String constraint, int matches) {
         return switch (constraint) {
-            case "Room capacity sufficient" ->
-                    "Some groups exceed every available room. Add a bigger room/amphitheater or split the group.";
-            case "Amphitheater required" ->
-                    "A 'Curs Amfiteatru' has no amphitheater free in its slot. Add amphitheater availability.";
-            case "Room availability" ->
-                    "An activity has no room available in its slot. Widen room availability windows.";
-            case "No room overlap", "No professor overlap", "No student group overlap" ->
-                    "Too many activities compete for the same slot. Free up slots or add resources.";
-            case "Master evening only" ->
-                    "Master activities only fit modules 6-8. Ensure enough evening room availability.";
-            case "Professor unavailability", "Professor forbidden room", "Professor only-this room" ->
-                    "A professor restriction cannot be satisfied. Relax the restriction or add eligible rooms.";
-            case "Unassigned activity" ->
-                    matches + " activities could not be placed without breaking a hard rule.";
-            default -> "Constraint '" + constraint + "' is violated " + matches + " time(s).";
+            case "No professor overlap" -> new String[] {
+                    "Un cadru didactic nu poate fi în două locuri odată",
+                    "Același cadru didactic ar preda două ore în același interval.",
+                    "Mută una dintre ore în alt interval sau dă-o altui cadru didactic."};
+            case "No room overlap" -> new String[] {
+                    "O sală nu poate găzdui două ore simultan",
+                    "Două activități ar folosi aceeași sală în același interval.",
+                    "Eliberează intervalul sau adaugă o sală care poate prelua una dintre ore."};
+            case "No student group overlap" -> new String[] {
+                    "O grupă nu poate avea două ore odată",
+                    "Aceeași grupă ar trebui să fie la două cursuri în același interval.",
+                    "Mută una dintre ore; dacă grupa e foarte încărcată, distribuie orele pe mai multe zile."};
+            case "Room capacity sufficient" -> new String[] {
+                    "Sala trebuie să încapă toți studenții",
+                    "Numărul de studenți depășește locurile din sala atribuită.",
+                    "Alege o sală mai mare, împarte grupa în două, sau corectează numărul de studenți în Administrare."};
+            case "Amphitheater required" -> new String[] {
+                    "Cursurile de amfiteatru cer amfiteatru",
+                    "O activitate marcată „Curs Amfiteatru” a primit o sală obișnuită.",
+                    "Eliberează un amfiteatru în acel interval sau scoate cerința de amfiteatru din Administrare."};
+            case "Room availability" -> new String[] {
+                    "Sala trebuie să fie disponibilă",
+                    "Ora a căzut într-un interval în care sala e marcată indisponibilă.",
+                    "Șterge sau restrânge indisponibilitatea sălii din Constrângeri, ori folosește altă sală."};
+            case "Master evening only" -> new String[] {
+                    "Masteratul se ține doar seara",
+                    "O activitate de master a primit un interval din timpul zilei (modulele 1–5).",
+                    "Fă loc în modulele 6–8 sau verifică dacă grupa e într-adevăr de master."};
+            case "Blocked day for terminal year" -> new String[] {
+                    "Ziua blocată rămâne liberă",
+                    "S-a programat o oră într-o zi blocată pentru acel an de studiu.",
+                    "Scoate regula din Constrângeri dacă ziua nu mai trebuie ținută liberă."};
+            case "Special category block" -> new String[] {
+                    "Intervalele rezervate (DCT, DPPD, CCOC, limbi) rămân libere",
+                    "O oră obișnuită a fost pusă peste un interval rezervat.",
+                    "Mută ora sau elimină blocajul din Constrângeri dacă nu mai e valabil."};
+            case "Professor unavailability" -> new String[] {
+                    "Cadrele didactice nu se programează când sunt indisponibile",
+                    "Ora cade peste un interval declarat indisponibil pentru acel cadru didactic.",
+                    "Restrânge indisponibilitatea din Constrângeri sau mută ora."};
+            case "Professor forbidden room" -> new String[] {
+                    "Sălile interzise unui cadru didactic",
+                    "Ora a primit o sală marcată ca interzisă pentru acel cadru didactic.",
+                    "Alege altă sală sau ridică restricția din Constrângeri."};
+            case "Professor only-this room" -> new String[] {
+                    "Cadre didactice legate de o singură sală",
+                    "Cadrul didactic poate preda doar într-o anumită sală, iar aceasta nu era liberă.",
+                    "Eliberează sala respectivă sau ridică restricția din Constrângeri."};
+            case "Consecutive slots same building" -> new String[] {
+                    "Ore consecutive în aceeași clădire",
+                    "O grupă ar trebui să schimbe clădirea între două ore lipite.",
+                    "Grupează orele aceleiași grupe în aceeași clădire, dacă se poate."};
+            case "Unassigned activity" -> new String[] {
+                    "Ore rămase neprogramate",
+                    matches + (matches == 1 ? " oră nu a încăput" : " ore nu au încăput")
+                            + " nicăieri fără să încalce o regulă.",
+                    "Vezi lista detaliată de mai sus — pentru fiecare oră scrie ce anume o blochează."};
+            default -> new String[] {
+                    constraint,
+                    "Regula „" + constraint + "” nu a putut fi respectată complet.",
+                    "Verifică datele legate de această regulă în Administrare sau Constrângeri."};
         };
     }
 

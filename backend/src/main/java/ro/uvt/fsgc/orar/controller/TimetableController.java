@@ -14,6 +14,9 @@ import ro.uvt.fsgc.orar.dto.CompareRequest;
 import ro.uvt.fsgc.orar.dto.CompareResultDto;
 import ro.uvt.fsgc.orar.dto.GenerateRequest;
 import ro.uvt.fsgc.orar.dto.TimetableResultDto;
+import ro.uvt.fsgc.orar.dto.BudgetAdvice;
+import ro.uvt.fsgc.orar.dto.UnassignedDiagnostic;
+import ro.uvt.fsgc.orar.service.GenerationAdvisor;
 import ro.uvt.fsgc.orar.service.SolverService;
 
 @RestController
@@ -22,17 +25,34 @@ import ro.uvt.fsgc.orar.service.SolverService;
 public class TimetableController {
 
     private final SolverService solverService;
+    private final GenerationAdvisor advisor;
 
-    public TimetableController(SolverService solverService) {
+    public TimetableController(SolverService solverService, GenerationAdvisor advisor) {
         this.solverService = solverService;
+        this.advisor = advisor;
+    }
+
+    /** Suggested time budget for the data currently loaded, with the reasoning behind it. */
+    @GetMapping("/suggested-budget")
+    public BudgetAdvice suggestedBudget() {
+        return advisor.suggestBudget();
+    }
+
+    /** Why each still-unplaced activity could not be scheduled, with near-miss placements. */
+    @GetMapping("/unassigned")
+    public java.util.List<UnassignedDiagnostic> unassigned() {
+        return advisor.diagnoseUnassigned();
     }
 
     /** Starts an asynchronous solve and returns the job id. */
     @PostMapping("/generate")
     public ResponseEntity<Map<String, String>> generate(@RequestBody(required = false) GenerateRequest request) {
         Integer seconds = request == null ? null : request.getTerminationSeconds();
-        String jobId = solverService.startGenerate(seconds);
-        return ResponseEntity.accepted().body(Map.of("jobId", jobId, "state", "SOLVING"));
+        SolverService.GenerateStart started = solverService.startGenerate(seconds);
+        return ResponseEntity.accepted().body(Map.of(
+                "jobId", started.jobId(),
+                "state", "SOLVING",
+                "alreadyRunning", String.valueOf(started.alreadyRunning())));
     }
 
     /** Lightweight status (state + score + counts) for polling. */
