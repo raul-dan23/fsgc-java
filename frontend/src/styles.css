@@ -426,3 +426,50 @@ tbody tr:hover td { background: #fbfcfe; }
 /* pill legend */
 .legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); }
 .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+/* ---------------------------------------------------- dashboard */
+
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.dash-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 20px 22px;
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  transition: border-color .15s, box-shadow .15s, transform .08s;
+}
+.dash-card:hover {
+  text-decoration: none;
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.dash-card .dash-icon {
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--accent);
+  font-size: 20px;
+  margin-bottom: 2px;
+}
+.dash-card .dash-title { font-size: 16px; font-weight: 650; letter-spacing: -.2px; }
+.dash-card .dash-text { font-size: 13px; color: var(--muted); line-height: 1.5; flex: 1; }
+.dash-card .badge:not(.ok):not(.warn):not(.bad) {
+  background: var(--panel-2);
+  color: var(--muted);
+  border-color: var(--border);
+}
+
+/* the brand is a link to the dashboard; keep the nav's own styling */
+.nav a.brand:hover { text-decoration: none; }

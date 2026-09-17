@@ -36,6 +36,12 @@ export const api = {
     const res = await fetch(`/api/timetable/result/${jobId}`);
     return (await json(res)).body;
   },
+  async suggestedBudget() {
+    return (await json(await fetch('/api/timetable/suggested-budget'))).body;
+  },
+  async unassignedDetails() {
+    return (await json(await fetch('/api/timetable/unassigned'))).body;
+  },
   async compare(budgets) {
     const res = await fetch('/api/timetable/compare', {
       method: 'POST',
@@ -68,6 +74,65 @@ export const api = {
       body: JSON.stringify({ timeSlotId, roomId }),
     });
     return (await json(res)).body;
+  },
+
+  // --- admin (CRUD pe datele de bază) ---
+  // kind: 'groups' | 'professors' | 'rooms' | 'subjects' | 'activities'
+  async adminSummary() {
+    return (await json(await fetch('/api/admin/summary'))).body;
+  },
+  async subjects() {
+    return (await json(await fetch('/api/data/subjects'))).body;
+  },
+  async activities() {
+    return (await json(await fetch('/api/admin/activities'))).body;
+  },
+  async adminCreate(kind, payload) {
+    const res = await fetch(`/api/admin/${kind}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return (await json(res)).body;
+  },
+  async adminUpdate(kind, id, payload) {
+    const res = await fetch(`/api/admin/${kind}/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return (await json(res)).body;
+  },
+  async adminDelete(kind, id) {
+    await json(await fetch(`/api/admin/${kind}/${id}`, { method: 'DELETE' }));
+  },
+
+  // --- orare salvate (istoric) ---
+  async savedTimetables() {
+    return (await json(await fetch('/api/saved-timetables'))).body;
+  },
+  async saveTimetable(payload) {
+    const res = await fetch('/api/saved-timetables', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return (await json(res)).body;
+  },
+  async renameTimetable(id, payload) {
+    const res = await fetch(`/api/saved-timetables/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return (await json(res)).body;
+  },
+  async restoreTimetable(id) {
+    const res = await fetch(`/api/saved-timetables/${id}/restore`, { method: 'POST' });
+    return (await json(res)).body;
+  },
+  async deleteSavedTimetable(id) {
+    await json(await fetch(`/api/saved-timetables/${id}`, { method: 'DELETE' }));
   },
 
   // --- weights ---
