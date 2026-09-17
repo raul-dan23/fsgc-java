@@ -13,7 +13,7 @@ import ro.uvt.fsgc.orar.domain.ProfessorRoomRestriction;
 import ro.uvt.fsgc.orar.domain.ProfessorUnavailability;
 import ro.uvt.fsgc.orar.domain.RestrictionType;
 import ro.uvt.fsgc.orar.domain.Room;
-import ro.uvt.fsgc.orar.domain.RoomAvailability;
+import ro.uvt.fsgc.orar.domain.RoomUnavailability;
 import ro.uvt.fsgc.orar.domain.RoomTypology;
 import ro.uvt.fsgc.orar.domain.ScheduledActivity;
 import ro.uvt.fsgc.orar.domain.SpecialBlockRule;
@@ -69,6 +69,16 @@ class TimetableConstraintProviderTest {
         r.setTypology(t);
         r.setBuilding(b);
         return r;
+    }
+
+    private static RoomUnavailability unavailable(Room r, DayOfWeek day, LocalTime from, LocalTime to) {
+        RoomUnavailability u = new RoomUnavailability();
+        u.setId(ids++);
+        u.setRoom(r);
+        u.setDayOfWeek(day);
+        u.setStartTime(from);
+        u.setEndTime(to);
+        return u;
     }
 
     private static Professor prof(String name) {
@@ -166,16 +176,53 @@ class TimetableConstraintProviderTest {
     }
 
     @Test
-    void roomAvailability_detected() {
+    void roomUnavailability_detected() {
         Room r = room("A", 50, RoomTypology.SEMINAR, null);
-        // available only Monday morning, but activity is Tuesday
-        r.getAvailabilities().add(new RoomAvailability(r, DayOfWeek.MONDAY,
+        // blocked Monday morning; the activity sits right inside that window
+        r.getUnavailabilities().add(unavailable(r, DayOfWeek.MONDAY,
                 LocalTime.of(8, 0), LocalTime.of(9, 30)));
         StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
-        verifier.verifyThat(TimetableConstraintProvider::roomAvailability)
-                .given(activity(prof("X"), ActivityType.COURSE, slot(DayOfWeek.TUESDAY, 1), r,
+        verifier.verifyThat(TimetableConstraintProvider::roomUnavailability)
+                .given(activity(prof("X"), ActivityType.COURSE, slot(DayOfWeek.MONDAY, 1), r,
                         WeekParity.EVERY_WEEK, g))
                 .penalizes(1);
+    }
+
+    @Test
+    void roomUnavailability_partialOverlapStillBlocks() {
+        Room r = room("A", 50, RoomTypology.SEMINAR, null);
+        // window clips only the tail of module 1 (08:00-09:30): an overlap is still a clash
+        r.getUnavailabilities().add(unavailable(r, DayOfWeek.MONDAY,
+                LocalTime.of(9, 0), LocalTime.of(12, 0)));
+        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
+        verifier.verifyThat(TimetableConstraintProvider::roomUnavailability)
+                .given(activity(prof("X"), ActivityType.COURSE, slot(DayOfWeek.MONDAY, 1), r,
+                        WeekParity.EVERY_WEEK, g))
+                .penalizes(1);
+    }
+
+    @Test
+    void roomWithoutUnavailability_isUsableOnEveryModule() {
+        // the point of the inverted model: no rows means the room is free all week, including
+        // module 8 (19:40-21:10), which the old availability windows used to exclude
+        Room r = room("A", 50, RoomTypology.SEMINAR, null);
+        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
+        verifier.verifyThat(TimetableConstraintProvider::roomUnavailability)
+                .given(activity(prof("X"), ActivityType.COURSE, slot(DayOfWeek.FRIDAY, 8), r,
+                        WeekParity.EVERY_WEEK, g))
+                .penalizes(0);
+    }
+
+    @Test
+    void roomUnavailability_otherDayIsUnaffected() {
+        Room r = room("A", 50, RoomTypology.SEMINAR, null);
+        r.getUnavailabilities().add(unavailable(r, DayOfWeek.MONDAY,
+                LocalTime.of(8, 0), LocalTime.of(21, 10)));
+        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
+        verifier.verifyThat(TimetableConstraintProvider::roomUnavailability)
+                .given(activity(prof("X"), ActivityType.COURSE, slot(DayOfWeek.TUESDAY, 1), r,
+                        WeekParity.EVERY_WEEK, g))
+                .penalizes(0);
     }
 
     @Test
