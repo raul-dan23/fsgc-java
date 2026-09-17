@@ -136,4 +136,60 @@ class AlternatingAudienceTest {
         assertEquals(Set.of(G2, shared),
                 ExcelImportService.audienceFor(specs.get(1), 1, specs, refs, true));
     }
+
+    // ----- seminars are taught per group, courses are not -----
+
+    @Test
+    void seminarWithTwoGroups_becomesTwoSeparateActivities() {
+        // "Politica externa a UE, s, gr. 1" and "... gr. 2" are two hours in the real timetable.
+        List<Set<StudentGroup>> perGroup =
+                ExcelImportService.splitPerGroup(ActivityType.SEMINAR, Set.of(G1, G2));
+        assertEquals(2, perGroup.size());
+        assertEquals(Set.of(G1, G2),
+                perGroup.stream().flatMap(Set::stream).collect(java.util.stream.Collectors.toSet()));
+        perGroup.forEach(one -> assertEquals(1, one.size()));
+    }
+
+    @Test
+    void seminarPerGroup_capacityIsOneGroup() {
+        List<Set<StudentGroup>> perGroup =
+                ExcelImportService.splitPerGroup(ActivityType.SEMINAR, Set.of(G1, G2));
+        // 27 or 28 students each, so a 40-seat seminar room fits — no amphitheatre needed.
+        perGroup.forEach(one -> {
+            int students = one.stream().mapToInt(StudentGroup::getStudentCount).sum();
+            assertTrue(students <= 40, "expected one group's worth of students, got " + students);
+        });
+    }
+
+    @Test
+    void courseWithTwoGroups_staysOneActivity() {
+        // Only courses combine groups: g1+g2 sit in the lecture together.
+        List<Set<StudentGroup>> perGroup =
+                ExcelImportService.splitPerGroup(ActivityType.COURSE, Set.of(G1, G2));
+        assertEquals(1, perGroup.size());
+        assertEquals(Set.of(G1, G2), perGroup.get(0));
+    }
+
+    @Test
+    void seminarWithOneGroup_staysOneActivity() {
+        List<Set<StudentGroup>> perGroup =
+                ExcelImportService.splitPerGroup(ActivityType.SEMINAR, Set.of(G1));
+        assertEquals(1, perGroup.size());
+    }
+
+    @Test
+    void seminarWithNoGroups_staysOneActivity() {
+        // Faculty-wide rows (DCT, set_studenti = "-") have no group to split by.
+        assertEquals(1, ExcelImportService.splitPerGroup(ActivityType.SEMINAR, Set.of()).size());
+    }
+
+    @Test
+    void alternatingSeminar_isNotSplitAgain() {
+        // The SI/SP halves already carry one group each, so they share one weekly hour
+        // instead of becoming one hour per group.
+        List<ActivitySpec> specs = ActivityTypeParser.parse("Seminar(SI)/Seminar(SP)");
+        List<GroupRef> refs = unmarked(G1, G2);
+        Set<StudentGroup> oddHalf = ExcelImportService.audienceFor(specs.get(0), 0, specs, refs, true);
+        assertEquals(1, ExcelImportService.splitPerGroup(ActivityType.SEMINAR, oddHalf).size());
+    }
 }

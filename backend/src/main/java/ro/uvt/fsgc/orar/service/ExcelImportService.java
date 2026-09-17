@@ -384,19 +384,29 @@ public class ExcelImportService {
 
             for (int i = 0; i < specs.size(); i++) {
                 ActivityTypeParser.ActivitySpec spec = specs.get(i);
-                ScheduledActivity a = new ScheduledActivity();
-                a.setSubject(subject);
-                a.setProfessor(professor);
-                a.setActivityType(spec.type());
-                a.setWeekParity(spec.parity());
-                a.setRequiresAmphitheater(spec.requiresAmphitheater());
-                a.setSpecialCategory(spec.category());
-                a.setRawType(activitate);
-                a.setDurationInSlots(1);
-                a.setParityPairKey(pairKey);
-                a.setStudentGroups(audienceFor(spec, i, specs, groupRefs, paired));
-                activityRepo.save(a);
-                activities++;
+                Set<StudentGroup> audience = audienceFor(spec, i, specs, groupRefs, paired);
+                List<Set<StudentGroup>> perGroup = splitPerGroup(spec.type(), audience);
+                if (perGroup.size() > 1) {
+                    result.addWarning(SHEET_SUBJECTS, excelRow,
+                            "'" + activitate + "' is taught per group: created " + perGroup.size()
+                                    + " separate activities (" + describeGroups(perGroup)
+                                    + "), each needing its own slot.");
+                }
+                for (Set<StudentGroup> oneAudience : perGroup) {
+                    ScheduledActivity a = new ScheduledActivity();
+                    a.setSubject(subject);
+                    a.setProfessor(professor);
+                    a.setActivityType(spec.type());
+                    a.setWeekParity(spec.parity());
+                    a.setRequiresAmphitheater(spec.requiresAmphitheater());
+                    a.setSpecialCategory(spec.category());
+                    a.setRawType(activitate);
+                    a.setDurationInSlots(1);
+                    a.setParityPairKey(pairKey);
+                    a.setStudentGroups(oneAudience);
+                    activityRepo.save(a);
+                    activities++;
+                }
             }
         }
         result.setSubjects(subjects);
@@ -495,6 +505,37 @@ public class ExcelImportService {
         return index < refs.size()
                 ? new LinkedHashSet<>(List.of(refs.get(index).group()))
                 : new LinkedHashSet<>();
+    }
+
+    /**
+     * Splits an audience into the activities actually held. A seminar or lab is taught once per
+     * group — the groups exist precisely so practical work happens in a room of 25-30 students, and
+     * each group gets its own slot, which is how the real timetable shows it ("s, gr. 1" and
+     * "s, gr. 2" on different days). A course is attended by all its groups together, so it stays
+     * a single activity.
+     *
+     * <p>An audience already divided by parity arrives here with one group per half, so an
+     * alternating "Seminar(SI)/Seminar(SP)" is left alone: there the two groups share one weekly
+     * hour instead of getting one each.
+     */
+    static List<Set<StudentGroup>> splitPerGroup(ActivityType type, Set<StudentGroup> audience) {
+        if (type == ActivityType.COURSE || audience.size() <= 1) {
+            return List.of(audience);
+        }
+        List<Set<StudentGroup>> perGroup = new ArrayList<>();
+        for (StudentGroup g : audience) {
+            perGroup.add(new LinkedHashSet<>(List.of(g)));
+        }
+        return perGroup;
+    }
+
+    /** "RISE1 - Grupa 1 | RISE1 - Grupa 2", for the import report. */
+    private static String describeGroups(List<Set<StudentGroup>> perGroup) {
+        List<String> names = new ArrayList<>();
+        for (Set<StudentGroup> one : perGroup) {
+            one.forEach(g -> names.add(g.getName()));
+        }
+        return String.join(" | ", names);
     }
 
     /** "RISE1 - Grupa 1 -> SI, RISE1 - Grupa 2 -> SP", for the import report. */
