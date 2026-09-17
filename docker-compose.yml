@@ -1,13 +1,24 @@
+# Every published port and container name is overridable, so two isolated instances can run
+# side by side -- one per section. The defaults are the single-instance values, so nothing
+# changes unless you set them. Volumes are named per compose project (-p), so each instance
+# gets its own database; nothing is shared between them.
+#
+#   docker compose -p orar-a up -d
+#   ORAR_PREFIX=orar-b APP_PORT=5281 BACKEND_PORT=8081 DB_PORT=5434 \
+#     docker compose -p orar-b up -d
+#
+# The two instances share no data at all, including the rooms. Whatever keeps them from
+# booking the same room at the same time has to be entered in each instance separately.
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: orar-postgres
+    container_name: ${ORAR_PREFIX:-orar}-postgres
     environment:
       POSTGRES_DB: orar
       POSTGRES_USER: orar
       POSTGRES_PASSWORD: orar
     ports:
-      - "5433:5432"
+      - "${DB_PORT:-5433}:5432"
     volumes:
       - orar-pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,14 +30,14 @@ services:
 
   backend:
     build: ./backend
-    container_name: orar-backend
+    container_name: ${ORAR_PREFIX:-orar}-backend
     environment:
       # point Spring Boot at the postgres service (not localhost) inside the compose network
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/orar
       SPRING_DATASOURCE_USERNAME: orar
       SPRING_DATASOURCE_PASSWORD: orar
     ports:
-      - "8080:8080"
+      - "${BACKEND_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,10 +45,10 @@ services:
 
   frontend:
     build: ./frontend
-    container_name: orar-frontend
+    container_name: ${ORAR_PREFIX:-orar}-frontend
     ports:
-      # open the app in a browser at http://localhost:5280
-      - "5280:80"
+      # open the app in a browser at http://localhost:${APP_PORT:-5280}
+      - "${APP_PORT:-5280}:80"
     depends_on:
       - backend
     restart: unless-stopped
