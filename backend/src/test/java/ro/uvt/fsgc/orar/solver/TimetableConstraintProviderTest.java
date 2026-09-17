@@ -106,6 +106,19 @@ class TimetableConstraintProviderTest {
         return a;
     }
 
+    /** Two halves of one alternating hour: same pair key, opposite parity, own group each. */
+    private static ScheduledActivity[] parityPair(String key, TimeSlot tsOdd, Room roomOdd,
+                                                  TimeSlot tsEven, Room roomEven,
+                                                  StudentGroup oddGroup, StudentGroup evenGroup) {
+        ScheduledActivity odd = activity(prof("X"), ActivityType.SEMINAR, tsOdd, roomOdd,
+                WeekParity.ODD_WEEKS, oddGroup);
+        ScheduledActivity even = activity(prof("X"), ActivityType.SEMINAR, tsEven, roomEven,
+                WeekParity.EVEN_WEEKS, evenGroup);
+        odd.setParityPairKey(key);
+        even.setParityPairKey(key);
+        return new ScheduledActivity[] {odd, even};
+    }
+
     // ----- hard constraint tests -----
 
     @Test
@@ -317,5 +330,69 @@ class TimetableConstraintProviderTest {
                         activity(prof("Y"), ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 2),
                                 room("V01", 50, RoomTypology.SEMINAR, parvan), WeekParity.EVERY_WEEK, g))
                 .penalizes(1);
+    }
+
+    // ----- alternating (SI/SP) pair tests -----
+
+    @Test
+    void parityPair_sameSlotAndRoom_notPenalized() {
+        TimeSlot ts = slot(DayOfWeek.MONDAY, 3);
+        Room r = room("A03", 40, RoomTypology.SEMINAR, null);
+        StudentGroup g1 = group("RISE1 - Grupa 1", "RISE", 1, StudyProgram.LICENSE, 27);
+        StudentGroup g2 = group("RISE1 - Grupa 2", "RISE", 1, StudyProgram.LICENSE, 28);
+        verifier.verifyThat(TimetableConstraintProvider::parityPairTogether)
+                .given((Object[]) parityPair("K1", ts, r, ts, r, g1, g2))
+                .penalizesBy(0);
+    }
+
+    @Test
+    void parityPair_differentRoomSameSlot_penalizedBy1() {
+        TimeSlot ts = slot(DayOfWeek.MONDAY, 3);
+        StudentGroup g1 = group("RISE1 - Grupa 1", "RISE", 1, StudyProgram.LICENSE, 27);
+        StudentGroup g2 = group("RISE1 - Grupa 2", "RISE", 1, StudyProgram.LICENSE, 28);
+        verifier.verifyThat(TimetableConstraintProvider::parityPairTogether)
+                .given((Object[]) parityPair("K1", ts, room("A03", 40, RoomTypology.SEMINAR, null),
+                        ts, room("A11", 40, RoomTypology.SEMINAR, null), g1, g2))
+                .penalizesBy(1);
+    }
+
+    @Test
+    void parityPair_differentDayAndRoom_penalizedBy3() {
+        StudentGroup g1 = group("RISE1 - Grupa 1", "RISE", 1, StudyProgram.LICENSE, 27);
+        StudentGroup g2 = group("RISE1 - Grupa 2", "RISE", 1, StudyProgram.LICENSE, 28);
+        // the real defect this constraint targets: Wednesday 13:00 vs Thursday 08:00
+        verifier.verifyThat(TimetableConstraintProvider::parityPairTogether)
+                .given((Object[]) parityPair("K1",
+                        slot(DayOfWeek.WEDNESDAY, 4), room("A03", 40, RoomTypology.SEMINAR, null),
+                        slot(DayOfWeek.THURSDAY, 1), room("A11", 40, RoomTypology.SEMINAR, null),
+                        g1, g2))
+                .penalizesBy(3);
+    }
+
+    @Test
+    void unpairedActivities_neverPenalized() {
+        TimeSlot ts = slot(DayOfWeek.FRIDAY, 2);
+        Room r = room("A03", 40, RoomTypology.SEMINAR, null);
+        StudentGroup g = group("AP1", "AP", 1, StudyProgram.LICENSE, 30);
+        // Null pair keys must not join with each other, whatever their parity.
+        verifier.verifyThat(TimetableConstraintProvider::parityPairTogether)
+                .given(activity(prof("X"), ActivityType.SEMINAR, ts, r, WeekParity.ODD_WEEKS, g),
+                        activity(prof("Y"), ActivityType.SEMINAR, ts, r, WeekParity.EVEN_WEEKS, g),
+                        activity(prof("Z"), ActivityType.COURSE, ts, r, WeekParity.EVERY_WEEK, g))
+                .penalizesBy(0);
+    }
+
+    @Test
+    void differentPairKeys_notPairedWithEachOther() {
+        TimeSlot ts = slot(DayOfWeek.MONDAY, 1);
+        Room r = room("A03", 40, RoomTypology.SEMINAR, null);
+        StudentGroup g = group("AP1", "AP", 1, StudyProgram.LICENSE, 30);
+        ScheduledActivity[] first = parityPair("K1", ts, r, ts, r, g, g);
+        ScheduledActivity[] second = parityPair("K2",
+                slot(DayOfWeek.TUESDAY, 1), r, slot(DayOfWeek.TUESDAY, 1), r, g, g);
+        // Each pair is satisfied on its own; the two pairs must not be compared across keys.
+        verifier.verifyThat(TimetableConstraintProvider::parityPairTogether)
+                .given(first[0], first[1], second[0], second[1])
+                .penalizesBy(0);
     }
 }

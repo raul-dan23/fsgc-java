@@ -53,6 +53,7 @@ public class TimetableConstraintProvider implements ConstraintProvider {
                 compactness(f),
                 globalWeeklyBalance(f),
                 professorPreference(f),
+                parityPairTogether(f),
         };
     }
 
@@ -282,7 +283,41 @@ public class TimetableConstraintProvider implements ConstraintProvider {
                 .asConstraint(PROFESSOR_PREFERENCE);
     }
 
+    /**
+     * S7. The two halves of one alternating hour (same {@code parityPairKey}, different parity)
+     * belong in the same slot and the same room: in the real timetable they are a single cell
+     * read "SI / SP", not two hours on different days. Soft, so the solver may still break the
+     * pair apart when nothing else fits. Penalty grows with how far apart they landed, which
+     * gives local search a gradient to follow: 2 for a different slot, 1 for a different room.
+     */
+    Constraint parityPairTogether(ConstraintFactory f) {
+        // Both sides are filtered to keyed activities before joining: a null key must not act as
+        // a join value, or every unpaired activity would match every other one.
+        return f.forEach(ScheduledActivity.class)
+                .filter(a -> a.getParityPairKey() != null)
+                .join(f.forEach(ScheduledActivity.class)
+                                .filter(b -> b.getParityPairKey() != null),
+                        Joiners.equal(ScheduledActivity::getParityPairKey),
+                        Joiners.lessThan(ScheduledActivity::getId))
+                .filter((a, b) -> a.getWeekParity() != b.getWeekParity())
+                .penalizeConfigurable(TimetableConstraintProvider::pairSeparation)
+                .asConstraint(PARITY_PAIR_TOGETHER);
+    }
+
     // =========================================================== helpers
+
+    /** 0 when both halves share slot and room, up to 3 when they share neither. */
+    static int pairSeparation(ScheduledActivity a, ScheduledActivity b) {
+        int penalty = 0;
+        if (!a.getTimeSlot().getId().equals(b.getTimeSlot().getId())) {
+            penalty += 2;
+        }
+        if (!a.getRoom().getId().equals(b.getRoom().getId())) {
+            penalty += 1;
+        }
+        return penalty;
+    }
+
 
     private static boolean audienceMatches(ScheduledActivity a, SpecialBlockRule rule) {
         if (rule.getStudentGroup() != null) {

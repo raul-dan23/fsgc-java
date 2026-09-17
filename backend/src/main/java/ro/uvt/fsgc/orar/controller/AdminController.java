@@ -298,7 +298,7 @@ public class AdminController {
                                 String weekParity, String specialCategory, boolean requiresAmphitheater,
                                 String rawType, int durationInSlots, List<Long> groupIds,
                                 List<String> groupNames, int students, String room, String day,
-                                Integer slotIndex) {
+                                Integer slotIndex, String parityPairKey) {
     }
 
     @GetMapping("/activities")
@@ -335,12 +335,13 @@ public class AdminController {
                 groupIds, groupNames, a.totalStudentCount(),
                 a.getRoom() == null ? null : a.getRoom().getName(),
                 a.getTimeSlot() == null ? null : a.getTimeSlot().getDayOfWeek().name(),
-                a.getTimeSlot() == null ? null : a.getTimeSlot().getSlotIndex());
+                a.getTimeSlot() == null ? null : a.getTimeSlot().getSlotIndex(),
+                a.getParityPairKey());
     }
 
     public record ActivityReq(Long subjectId, Long professorId, String activityType, String weekParity,
                               String specialCategory, Boolean requiresAmphitheater, String rawType,
-                              Integer durationInSlots, List<Long> groupIds) {
+                              Integer durationInSlots, List<Long> groupIds, String parityPairKey) {
     }
 
     @PostMapping("/activities")
@@ -369,6 +370,8 @@ public class AdminController {
         a.setSpecialCategory(enumOr(SpecialCategory.class, req.specialCategory(), SpecialCategory.NORMAL));
         a.setRequiresAmphitheater(Boolean.TRUE.equals(req.requiresAmphitheater()));
         a.setRawType(trimmed(req.rawType()));
+        // Carried through so editing one half of an alternating hour does not unpair it.
+        a.setParityPairKey(trimmed(req.parityPairKey()));
         a.setDurationInSlots(req.durationInSlots() == null || req.durationInSlots() < 1
                 ? 1 : req.durationInSlots());
 

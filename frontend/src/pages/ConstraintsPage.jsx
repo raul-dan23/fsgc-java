@@ -21,6 +21,7 @@ const WEIGHT_FIELDS = [
   ['compactness', 'Compactarea zilei'],
   ['globalWeeklyBalance', 'Echilibrarea pe întreaga săptămână'],
   ['professorPreference', 'Preferințele cadrelor didactice'],
+  ['parityPairTogether', 'Ore alternative SI/SP în același interval'],
 ];
 
 /** "08:00:00" -> "08:00" */

@@ -15,6 +15,8 @@ import ro.uvt.fsgc.orar.domain.WeekParity;
  *   <li>SI = saptamani impare = ODD_WEEKS, SP = saptamani pare = EVEN_WEEKS</li>
  *   <li>combined values like {@code Curs(SI)/Seminar(SP)} split into two specs with
  *       different parity; {@code Curs/Seminar} -> COURSE odd + SEMINAR even</li>
+ *   <li>a {@code set_studenti} token may carry its own marker ({@code RISE1 - Grupa 1(SI)})
+ *       to pin one group to one half of an alternating hour</li>
  * </ul>
  */
 public final class ActivityTypeParser {
@@ -24,7 +26,53 @@ public final class ActivityTypeParser {
                                boolean requiresAmphitheater, SpecialCategory category) {
     }
 
+    /**
+     * One {@code set_studenti} token with its optional parity marker stripped off:
+     * {@code "RISE1 - Grupa 1(SI)"} -> name {@code "RISE1 - Grupa 1"}, parity ODD_WEEKS.
+     * {@code parity} is null when the token carries no marker, which is the common case.
+     */
+    public record GroupToken(String name, WeekParity parity) {
+    }
+
     private ActivityTypeParser() {
+    }
+
+    /**
+     * Splits an optional trailing {@code (SI)} / {@code (SP)} marker off a set_studenti token.
+     * Used to say explicitly which group attends which half of an alternating hour, when the
+     * order in the cell is not the intended pairing.
+     */
+    public static GroupToken parseGroupToken(String raw) {
+        String token = raw == null ? "" : raw.trim();
+        var m = java.util.regex.Pattern
+                .compile("^(.*?)\\s*\\(\\s*(SI|SP)\\s*\\)\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(token);
+        if (!m.matches()) {
+            return new GroupToken(token, null);
+        }
+        WeekParity parity = m.group(2).equalsIgnoreCase("SI")
+                ? WeekParity.ODD_WEEKS : WeekParity.EVEN_WEEKS;
+        return new GroupToken(m.group(1).trim(), parity);
+    }
+
+    /**
+     * True when a combined value describes the SAME activity split across alternating weeks —
+     * "Seminar(SI)/Seminar(SP)" — rather than two different activity types sharing one hour
+     * ("Curs(SI)/Seminar(SP)"). Only the former means "each group attends every other week";
+     * the latter keeps the whole audience on both halves.
+     */
+    public static boolean isAlternatingSameType(List<ActivitySpec> specs) {
+        if (specs.size() < 2) {
+            return false;
+        }
+        ActivityType type = specs.get(0).type();
+        java.util.Set<WeekParity> parities = new java.util.HashSet<>();
+        for (ActivitySpec s : specs) {
+            if (s.type() != type || s.parity() == WeekParity.EVERY_WEEK || !parities.add(s.parity())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Returns the list of activities to create for one Discipline row, or empty if unparseable. */

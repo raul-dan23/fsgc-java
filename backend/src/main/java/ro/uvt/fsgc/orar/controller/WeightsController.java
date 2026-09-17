@@ -40,6 +40,7 @@ public class WeightsController {
         w.setCompactness(incoming.getCompactness());
         w.setGlobalWeeklyBalance(incoming.getGlobalWeeklyBalance());
         w.setProfessorPreference(incoming.getProfessorPreference());
+        w.setParityPairTogether(incoming.getParityPairTogether());
         return ResponseEntity.ok(repo.save(w));
     }
 }

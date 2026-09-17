@@ -254,6 +254,13 @@ public class SolverService {
                     matches + (matches == 1 ? " oră nu a încăput" : " ore nu au încăput")
                             + " nicăieri fără să încalce o regulă.",
                     "Vezi lista detaliată de mai sus — pentru fiecare oră scrie ce anume o blochează."};
+            case "Alternating halves share slot and room" -> new String[] {
+                    "Ora alternativă (SI/SP) stă într-o singură celulă",
+                    "Cele două jumătăți ale unei ore care alternează săptămânal"
+                            + " au ajuns în intervale sau săli diferite.",
+                    "Nu blochează orarul, dar se citește mai greu. Scade ponderea"
+                            + " „Ore alternative SI/SP în același interval” din Constrângeri"
+                            + " dacă preferi libertate mai mare la plasare."};
             default -> new String[] {
                     constraint,
                     "Regula „" + constraint + "” nu a putut fi respectată complet.",

@@ -94,6 +94,7 @@ public class TimetableDataService {
         c.setCompactness(HardMediumSoftScore.ofSoft(w.getCompactness()));
         c.setGlobalWeeklyBalance(HardMediumSoftScore.ofSoft(w.getGlobalWeeklyBalance()));
         c.setProfessorPreference(HardMediumSoftScore.ofSoft(w.getProfessorPreference()));
+        c.setParityPairTogether(HardMediumSoftScore.ofSoft(w.getParityPairTogether()));
         return c;
     }
 

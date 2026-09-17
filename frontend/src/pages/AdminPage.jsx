@@ -163,13 +163,15 @@ function buildTabs({ subjects, professors, groups }) {
       blank: {
         subjectId: subjects[0] ? subjects[0].id : null, professorId: null, activityType: 'SEMINAR',
         weekParity: 'EVERY_WEEK', specialCategory: 'NORMAL', requiresAmphitheater: false,
-        rawType: 'Seminar', durationInSlots: 1, groupIds: [],
+        rawType: 'Seminar', durationInSlots: 1, groupIds: [], parityPairKey: null,
       },
       payload: (r) => ({
         subjectId: r.subjectId, professorId: r.professorId || null, activityType: r.activityType,
         weekParity: r.weekParity, specialCategory: r.specialCategory,
         requiresAmphitheater: !!r.requiresAmphitheater, rawType: r.rawType,
         durationInSlots: num(r.durationInSlots), groupIds: r.groupIds || [],
+        // Not editable here, but must round-trip or saving would unpair an SI/SP hour.
+        parityPairKey: r.parityPairKey || null,
       }),
       label_of: (r) => `${r.subjectName} (${r.activityType})`,
       columns: [

@@ -48,4 +48,11 @@ public class ConstraintWeights {
     /** Reward weight for honoring professor time preferences. */
     @Column(name = "professor_preference", nullable = false)
     private int professorPreference = 5;
+
+    /**
+     * Penalty pulling the two halves of an alternating (SI/SP) hour onto the same slot and room,
+     * so they read as a single timetable cell instead of two hours on different days.
+     */
+    @Column(name = "parity_pair_together", nullable = false)
+    private int parityPairTogether = 50;
 }

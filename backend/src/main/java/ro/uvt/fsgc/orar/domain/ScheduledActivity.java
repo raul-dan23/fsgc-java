@@ -84,6 +84,15 @@ public class ScheduledActivity {
     @Column(name = "raw_type")
     private String rawType;
 
+    /**
+     * Links the alternating halves that came from one combined Excel cell (e.g. the SI and SP
+     * halves of "Seminar(SI)/Seminar(SP)"). Both halves share the same key, so the solver can
+     * recognize them as one weekly hour and keep them in the same slot and room. Null for an
+     * ordinary activity that has no alternating twin.
+     */
+    @Column(name = "parity_pair_key")
+    private String parityPairKey;
+
     // ---- Planning variables (assigned by the solver) ----
 
     @PlanningVariable(valueRangeProviderRefs = "timeSlotRange", allowsUnassigned = true)

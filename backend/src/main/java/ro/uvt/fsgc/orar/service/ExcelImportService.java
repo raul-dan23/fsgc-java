@@ -26,6 +26,7 @@ import ro.uvt.fsgc.orar.domain.ScheduledActivity;
 import ro.uvt.fsgc.orar.domain.StudentGroup;
 import ro.uvt.fsgc.orar.domain.StudyProgram;
 import ro.uvt.fsgc.orar.domain.Subject;
+import ro.uvt.fsgc.orar.domain.WeekParity;
 import ro.uvt.fsgc.orar.dto.ImportResult;
 import ro.uvt.fsgc.orar.repository.BlockedDayRuleRepository;
 import ro.uvt.fsgc.orar.repository.BuildingRepository;
@@ -355,8 +356,9 @@ public class ExcelImportService {
                 }
             }
 
-            // Resolve student groups from set_studenti.
-            Set<StudentGroup> groups = resolveGroups(setStudenti, groupByName, groupBySpecYear, result, excelRow);
+            // Resolve student groups from set_studenti, keeping cell order and any (SI)/(SP) marker.
+            List<GroupRef> groupRefs = resolveGroupRefs(setStudenti, groupByName, groupBySpecYear,
+                    result, excelRow);
 
             Subject subject = subjectByCode.get(codMaterie);
             if (subject == null) {
@@ -369,7 +371,19 @@ public class ExcelImportService {
                 subjects++;
             }
 
-            for (ActivityTypeParser.ActivitySpec spec : specs) {
+            // Halves of one alternating hour share a key so the solver keeps them together.
+            boolean paired = specs.size() > 1 && splitsAudienceByParity(specs, groupRefs);
+            String pairKey = specs.size() > 1 ? codMaterie + "#" + excelRow : null;
+            if (paired) {
+                result.addWarning(SHEET_SUBJECTS, excelRow,
+                        "Alternating hour '" + activitate + "': split " + groupRefs.size()
+                                + " groups one per half (" + describePairing(specs, groupRefs)
+                                + "). Add (SI)/(SP) after a group name in set_studenti to choose"
+                                + " the pairing explicitly.");
+            }
+
+            for (int i = 0; i < specs.size(); i++) {
+                ActivityTypeParser.ActivitySpec spec = specs.get(i);
                 ScheduledActivity a = new ScheduledActivity();
                 a.setSubject(subject);
                 a.setProfessor(professor);
@@ -379,7 +393,8 @@ public class ExcelImportService {
                 a.setSpecialCategory(spec.category());
                 a.setRawType(activitate);
                 a.setDurationInSlots(1);
-                a.setStudentGroups(new LinkedHashSet<>(groups));
+                a.setParityPairKey(pairKey);
+                a.setStudentGroups(audienceFor(spec, i, specs, groupRefs, paired));
                 activityRepo.save(a);
                 activities++;
             }
@@ -390,39 +405,112 @@ public class ExcelImportService {
 
     // ------------------------------------------------------------------ helpers
 
-    /** Resolves a set_studenti string ("AP1+SP1+RISE1", "RISE3 - Grupa 1+...", "-") to groups. */
-    private Set<StudentGroup> resolveGroups(String setStudenti, Map<String, StudentGroup> byName,
+    /** A resolved group plus the explicit (SI)/(SP) marker its token carried, if any. */
+    record GroupRef(StudentGroup group, WeekParity parity) {
+    }
+
+    /**
+     * Resolves a set_studenti string ("AP1+SP1+RISE1", "RISE3 - Grupa 1+...", "-") to groups,
+     * preserving the order they appear in the cell and any per-group (SI)/(SP) marker. Order
+     * matters: for an alternating hour written without markers, the first group takes the first
+     * half. Duplicates are dropped, keeping the first occurrence.
+     */
+    private List<GroupRef> resolveGroupRefs(String setStudenti, Map<String, StudentGroup> byName,
                                             Map<String, List<StudentGroup>> bySpecYear,
                                             ImportResult result, int excelRow) {
-        Set<StudentGroup> groups = new LinkedHashSet<>();
+        List<GroupRef> refs = new ArrayList<>();
+        Set<StudentGroup> seen = new LinkedHashSet<>();
         if (setStudenti == null || setStudenti.equals("-") || setStudenti.isBlank()) {
-            return groups; // faculty-wide / no specific audience (e.g. DCT)
+            return refs; // faculty-wide / no specific audience (e.g. DCT)
         }
         for (String rawToken : setStudenti.split("\\+")) {
-            String token = rawToken.trim();
+            ActivityTypeParser.GroupToken parsed = ActivityTypeParser.parseGroupToken(rawToken);
+            String token = parsed.name();
             if (token.isEmpty() || token.equals("-")) {
                 continue;
             }
+            List<StudentGroup> resolved = new ArrayList<>();
             String specYearKey = token.replaceAll("\\s+", "").toUpperCase();
             boolean bare = specYearKey.matches("[A-Z]+[0-9]+");
             if (bare && bySpecYear.containsKey(specYearKey)) {
-                groups.addAll(bySpecYear.get(specYearKey));
+                resolved.addAll(bySpecYear.get(specYearKey));
             } else if (byName.containsKey(token)) {
-                groups.add(byName.get(token));
+                resolved.add(byName.get(token));
             } else if (bySpecYear.containsKey(specYearKey)) {
-                groups.addAll(bySpecYear.get(specYearKey));
+                resolved.addAll(bySpecYear.get(specYearKey));
             } else {
                 // The Discipline sheet references a group/section not declared in Sectii (real data
                 // gap, e.g. "SSEC3"). Rather than blocking the whole import, auto-create a placeholder
                 // group with a default size and surface a loud warning so it can be corrected.
                 StudentGroup placeholder = createPlaceholderGroup(token, specYearKey, byName, bySpecYear);
-                groups.add(placeholder);
+                resolved.add(placeholder);
                 result.addWarning(SHEET_SUBJECTS, excelRow,
                         "Group '" + token + "' is not in Sectii — auto-created placeholder (size "
                                 + PLACEHOLDER_GROUP_SIZE + "). Add it to Sectii for accurate capacity.");
             }
+            for (StudentGroup g : resolved) {
+                if (seen.add(g)) {
+                    refs.add(new GroupRef(g, parsed.parity()));
+                }
+            }
         }
-        return groups;
+        return refs;
+    }
+
+    /**
+     * True when the halves of a combined activitate value should each take part of the audience
+     * instead of all of it. Explicit (SI)/(SP) markers on the groups always decide; without them,
+     * only a same-type alternating value ("Seminar(SI)/Seminar(SP)") with exactly as many groups
+     * as halves is split, one group per half. Anything else — notably "Curs(SI)/Seminar(SP)",
+     * where the same audience alternates between a course and a seminar — keeps every group on
+     * every half.
+     */
+    static boolean splitsAudienceByParity(List<ActivityTypeParser.ActivitySpec> specs,
+                                          List<GroupRef> refs) {
+        if (specs.size() < 2 || refs.isEmpty()) {
+            return false;
+        }
+        if (refs.stream().anyMatch(r -> r.parity() != null)) {
+            return true;
+        }
+        return ActivityTypeParser.isAlternatingSameType(specs) && refs.size() == specs.size();
+    }
+
+    /** The groups attending one half of a (possibly alternating) activitate value. */
+    static Set<StudentGroup> audienceFor(ActivityTypeParser.ActivitySpec spec, int index,
+                                         List<ActivityTypeParser.ActivitySpec> specs,
+                                         List<GroupRef> refs, boolean paired) {
+        if (!paired) {
+            return refs.stream().map(GroupRef::group)
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        }
+        if (refs.stream().anyMatch(r -> r.parity() != null)) {
+            // A marked group attends only its own half; an unmarked one attends every half.
+            return refs.stream()
+                    .filter(r -> r.parity() == null || r.parity() == spec.parity())
+                    .map(GroupRef::group)
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        }
+        // No markers: pair by position, so the first group in the cell takes the first half.
+        return index < refs.size()
+                ? new LinkedHashSet<>(List.of(refs.get(index).group()))
+                : new LinkedHashSet<>();
+    }
+
+    /** "RISE1 - Grupa 1 -> SI, RISE1 - Grupa 2 -> SP", for the import report. */
+    private static String describePairing(List<ActivityTypeParser.ActivitySpec> specs,
+                                         List<GroupRef> refs) {
+        List<String> parts = new ArrayList<>();
+        for (int i = 0; i < specs.size(); i++) {
+            for (StudentGroup g : audienceFor(specs.get(i), i, specs, refs, true)) {
+                parts.add(g.getName() + " -> " + shortParity(specs.get(i).parity()));
+            }
+        }
+        return String.join(", ", parts);
+    }
+
+    private static String shortParity(WeekParity p) {
+        return p == WeekParity.ODD_WEEKS ? "SI" : p == WeekParity.EVEN_WEEKS ? "SP" : "toate";
     }
 
     /** Creates, persists and registers a placeholder professor for a name missing from Profesori. */

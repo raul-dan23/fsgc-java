@@ -8,7 +8,7 @@ import ai.timefold.solver.core.api.score.buildin.hardmediumsoft.HardMediumSoftSc
  * Weights for EVERY constraint. Timefold requires that, when a constraint configuration is used,
  * every constraint in the {@link TimetableConstraintProvider} has a matching {@code @ConstraintWeight}.
  * Hard constraints are fixed at 1 hard (non-negotiable), the unassigned penalty at 1 medium, and the
- * six quality constraints carry tunable soft weights mirrored from the {@code constraint_weights} DB row.
+ * seven quality constraints carry tunable soft weights mirrored from the {@code constraint_weights} DB row.
  */
 @ConstraintConfiguration(constraintPackage = "ro.uvt.fsgc.orar.solver")
 public class TimetableConstraintConfiguration {
@@ -36,6 +36,7 @@ public class TimetableConstraintConfiguration {
     public static final String COMPACTNESS = "Compact a group's day";
     public static final String GLOBAL_WEEKLY_BALANCE = "Faculty-wide weekly balance";
     public static final String PROFESSOR_PREFERENCE = "Honor professor time preferences";
+    public static final String PARITY_PAIR_TOGETHER = "Alternating halves share slot and room";
 
     // ---- hard weights (fixed) ----
     @ConstraintWeight(NO_PROFESSOR_OVERLAP)
@@ -82,6 +83,8 @@ public class TimetableConstraintConfiguration {
     private HardMediumSoftScore globalWeeklyBalance = HardMediumSoftScore.ofSoft(5);
     @ConstraintWeight(PROFESSOR_PREFERENCE)
     private HardMediumSoftScore professorPreference = HardMediumSoftScore.ofSoft(5);
+    @ConstraintWeight(PARITY_PAIR_TOGETHER)
+    private HardMediumSoftScore parityPairTogether = HardMediumSoftScore.ofSoft(50);
 
     // Hard/medium getters are required by Timefold to read the weights.
     public HardMediumSoftScore getNoProfessorOverlap() { return noProfessorOverlap; }
@@ -111,4 +114,6 @@ public class TimetableConstraintConfiguration {
     public void setGlobalWeeklyBalance(HardMediumSoftScore v) { this.globalWeeklyBalance = v; }
     public HardMediumSoftScore getProfessorPreference() { return professorPreference; }
     public void setProfessorPreference(HardMediumSoftScore v) { this.professorPreference = v; }
+    public HardMediumSoftScore getParityPairTogether() { return parityPairTogether; }
+    public void setParityPairTogether(HardMediumSoftScore v) { this.parityPairTogether = v; }
 }
