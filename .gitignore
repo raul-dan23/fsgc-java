@@ -17,3 +17,6 @@ npm-debug.log*
 
 # Local runtime logs
 *.log
+
+# Documente de lucru (nu cod)
+Constrângeri orar.docx

@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: orar
       POSTGRES_PASSWORD: orar
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - orar-pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -15,6 +15,32 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: orar-backend
+    environment:
+      # point Spring Boot at the postgres service (not localhost) inside the compose network
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/orar
+      SPRING_DATASOURCE_USERNAME: orar
+      SPRING_DATASOURCE_PASSWORD: orar
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: orar-frontend
+    ports:
+      # open the app in a browser at http://localhost:5280
+      - "5280:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
 
 volumes:
   orar-pgdata:
