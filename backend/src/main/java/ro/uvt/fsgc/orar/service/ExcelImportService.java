@@ -152,10 +152,10 @@ public class ExcelImportService {
         profUnavailRepo.deleteAllInBatch();
         profRoomRepo.deleteAllInBatch();
         blockedDayRepo.deleteAllInBatch();
-        // Bulk delete issues immediate SQL (before the new inserts flush); the DB-level
-        // ON DELETE CASCADE on room_availability/room_equipment/room_unavailability removes the
-        // children -- note this also clears manually configured room unavailabilities.
-        roomRepo.deleteAllInBatch();
+        // Rooms are deliberately NOT deleted. They are matched by name and updated in
+        // parseRooms instead, because deleting a room takes its unavailability windows with it
+        // (DB-level ON DELETE CASCADE) and those are entered by hand, one interval at a time.
+        // A room the sheet does not mention is left alone; remove it from Administrare instead.
         subjectRepo.deleteAllInBatch();
         groupRepo.deleteAllInBatch();
         professorRepo.deleteAllInBatch();
@@ -260,8 +260,14 @@ public class ExcelImportService {
 
     // ------------------------------------------------------------------ Sali
 
+    /**
+     * Upserts the rooms by name. An existing room keeps its identity — and therefore its
+     * unavailability windows — and only has its columns refreshed; a room missing from the sheet
+     * is left untouched rather than deleted.
+     */
     private void parseRooms(Sheet sheet, ImportResult result) {
         int saved = 0;
+        int updated = 0;
         int avail = 0;
         Set<String> seen = new HashSet<>();
         for (int r = 1; r <= sheet.getLastRowNum(); r++) {
@@ -279,7 +285,29 @@ public class ExcelImportService {
                 result.addWarning(SHEET_ROOMS, excelRow, "Duplicate room '" + name + "', row skipped");
                 continue;
             }
-            Room room = new Room();
+            Room existing = roomRepo.findByName(name).orElse(null);
+            if (existing == null) {
+                // "028" in the app and "28" in the sheet are the same room to a human but two
+                // rows to the database, and the new one arrives without the unavailabilities that
+                // were configured by hand. Say so rather than quietly creating a near-duplicate.
+                roomRepo.findAll().stream()
+                        .filter(other -> sameRoomLoosely(other.getName(), name))
+                        .findFirst()
+                        .ifPresent(twin -> result.addWarning(SHEET_ROOMS, excelRow,
+                                "Room '" + name + "' looks like the existing '" + twin.getName()
+                                        + "' but the names differ, so a second room was created."
+                                        + " Rename one of them so they match, or the configured"
+                                        + " unavailabilities will not apply to this one."));
+            }
+            Room room = existing != null ? existing : new Room();
+            if (existing != null) {
+                updated++;
+                // Re-imported windows replace the previous ones; the unavailabilities are a
+                // separate collection and stay as configured.
+                room.getAvailabilities().clear();
+            } else {
+                saved++;
+            }
             room.setName(name);
             room.setDepartment(ExcelCells.str(row, 1));
             room.setFloor(ExcelCells.str(row, 2));
@@ -303,9 +331,16 @@ public class ExcelImportService {
                 avail++;
             }
             roomRepo.save(room);
-            saved++;
         }
-        result.setRooms(saved);
+        long kept = roomRepo.count() - saved - updated;
+        if (saved == 0 && updated == 0) {
+            result.addWarning(SHEET_ROOMS, 1, "Sheet has no room rows. The " + roomRepo.count()
+                    + " existing rooms and their unavailabilities were kept untouched.");
+        } else if (kept > 0) {
+            result.addWarning(SHEET_ROOMS, 1, kept + " room(s) already in the app are not in this"
+                    + " sheet and were left untouched. Delete them in Administrare if obsolete.");
+        }
+        result.setRooms(saved + updated);
         result.setRoomAvailabilities(avail);
     }
 
@@ -552,6 +587,17 @@ public class ExcelImportService {
 
     private static String shortParity(WeekParity p) {
         return p == WeekParity.ODD_WEEKS ? "SI" : p == WeekParity.EVEN_WEEKS ? "SP" : "toate";
+    }
+
+    /** Same room to a human: ignoring case, surrounding spaces and leading zeros ("028" = "28"). */
+    private static boolean sameRoomLoosely(String a, String b) {
+        return loosenRoomName(a).equals(loosenRoomName(b));
+    }
+
+    private static String loosenRoomName(String n) {
+        String v = n == null ? "" : n.trim().toUpperCase().replaceAll("\\s+", "");
+        String stripped = v.replaceFirst("^0+", "");
+        return stripped.isEmpty() ? v : stripped;
     }
 
     /** Creates, persists and registers a placeholder professor for a name missing from Profesori. */
