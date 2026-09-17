@@ -406,6 +406,8 @@ public class ExcelImportService {
                 subjects++;
             }
 
+            warnIfGroupNamedTwice(materie, groupRefs, result, excelRow);
+
             // Halves of one alternating hour share a key so the solver keeps them together.
             boolean paired = specs.size() > 1 && splitsAudienceByParity(specs, groupRefs);
             String pairKey = specs.size() > 1 ? codMaterie + "#" + excelRow : null;
@@ -587,6 +589,35 @@ public class ExcelImportService {
 
     private static String shortParity(WeekParity p) {
         return p == WeekParity.ODD_WEEKS ? "SI" : p == WeekParity.EVEN_WEEKS ? "SP" : "toate";
+    }
+
+    /**
+     * Catches a row that splits by group twice over: the subject is named "... Grupa 1", so the
+     * sheet has already made one row per group, but set_studenti still names the whole year. The
+     * seminar is then held once per group for EACH of those rows, which is twice too many hours.
+     * Warned about rather than guessed at, because the fix is a decision about the source data.
+     */
+    static void warnIfGroupNamedTwice(String subjectName, List<GroupRef> refs,
+                                      ImportResult result, int excelRow) {
+        if (subjectName == null || refs.size() < 2) {
+            return;
+        }
+        var m = java.util.regex.Pattern.compile("\\bgr(?:upa)?\\.?\\s*(\\d+)\\s*$",
+                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(subjectName.trim());
+        if (!m.find()) {
+            return;
+        }
+        String wanted = "GRUPA" + m.group(1);
+        boolean audienceNamesIt = refs.stream().anyMatch(r ->
+                r.group().getName() != null
+                        && r.group().getName().toUpperCase().replaceAll("\\s+", "").endsWith(wanted));
+        if (audienceNamesIt) {
+            result.addWarning(SHEET_SUBJECTS, excelRow,
+                    "Subject '" + subjectName + "' already names a group, but set_studenti lists "
+                            + refs.size() + " groups, so this row becomes " + refs.size()
+                            + " seminars instead of 1. Name only that group in set_studenti, or"
+                            + " drop the group from the subject name.");
+        }
     }
 
     /** Same room to a human: ignoring case, surrounding spaces and leading zeros ("028" = "28"). */

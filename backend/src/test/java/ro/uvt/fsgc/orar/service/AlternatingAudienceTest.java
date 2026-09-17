@@ -192,4 +192,44 @@ class AlternatingAudienceTest {
         Set<StudentGroup> oddHalf = ExcelImportService.audienceFor(specs.get(0), 0, specs, refs, true);
         assertEquals(1, ExcelImportService.splitPerGroup(ActivityType.SEMINAR, oddHalf).size());
     }
+
+    // ----- a row that splits by group twice over -----
+
+    @Test
+    void subjectNamedAfterAGroup_withWholeYearAudience_isFlagged() {
+        // "Administratie Publica Grupa 1" + set_studenti naming both groups becomes two seminars,
+        // and the sibling row "... Grupa 2" becomes two more: four hours where two are needed.
+        ro.uvt.fsgc.orar.dto.ImportResult result = new ro.uvt.fsgc.orar.dto.ImportResult();
+        ExcelImportService.warnIfGroupNamedTwice("Administratie Publica Grupa 1",
+                unmarked(G1, G2), result, 42);
+        assertEquals(1, result.getWarnings().size());
+        assertTrue(result.getWarnings().get(0).message().contains("2 seminars"),
+                result.getWarnings().get(0).message());
+    }
+
+    @Test
+    void subjectNamedAfterAGroup_withOneGroup_isFine() {
+        // The intended shape: the row names the group and the audience is just that group.
+        ro.uvt.fsgc.orar.dto.ImportResult result = new ro.uvt.fsgc.orar.dto.ImportResult();
+        ExcelImportService.warnIfGroupNamedTwice("Administratie Publica Grupa 1",
+                unmarked(G1), result, 42);
+        assertTrue(result.getWarnings().isEmpty());
+    }
+
+    @Test
+    void subjectWithoutGroupInName_isFine() {
+        // The other intended shape: one row for the subject, split per group by the importer.
+        ro.uvt.fsgc.orar.dto.ImportResult result = new ro.uvt.fsgc.orar.dto.ImportResult();
+        ExcelImportService.warnIfGroupNamedTwice("Administratie Publica",
+                unmarked(G1, G2), result, 42);
+        assertTrue(result.getWarnings().isEmpty());
+    }
+
+    @Test
+    void groupNameMustActuallyMatchTheAudience() {
+        // "... Grupa 3" with groups 1 and 2 is a different situation, so stay quiet.
+        ro.uvt.fsgc.orar.dto.ImportResult result = new ro.uvt.fsgc.orar.dto.ImportResult();
+        ExcelImportService.warnIfGroupNamedTwice("Ceva Grupa 3", unmarked(G1, G2), result, 42);
+        assertTrue(result.getWarnings().isEmpty());
+    }
 }
