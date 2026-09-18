@@ -36,14 +36,31 @@ Mergi pe pagina **Import** și încarcă fișierul Excel al semestrului
 (`sablon_import_semestru.xlsx` din folderul proiectului este un exemplu).
 Apoi: **Generare** → **Orar**. (Vezi manualul de utilizare pentru detalii.)
 
+## După o actualizare de cod: `--build`
+
+Docker nu reconstruiește singur. `docker compose up -d` pornește **imaginea construită ultima
+dată** — dacă între timp codul s-a schimbat (ai luat o versiune nouă, ai făcut `git pull`), în
+browser îți apare tot aplicația veche, fără modificările noi. De fiecare dată când codul s-a
+schimbat:
+
+```bash
+docker compose up -d --build
+```
+
+Verifică ce imagine rulezi:
+
+```bash
+docker images | grep fsgc-java     # data la care au fost construite
+```
+
 ## Comenzi utile
 
 | Ce vrei | Comandă |
 |---|---|
-| Pornește în fundal | `docker compose up -d` |
+| Pornește în fundal (cod neschimbat) | `docker compose up -d` |
 | Oprește | `docker compose down` |
 | Oprește și șterge datele | `docker compose down -v` |
-| Reconstruiește după modificări de cod | `docker compose up --build` |
+| **Pornește după o modificare de cod** | `docker compose up -d --build` |
 | Vezi logurile | `docker compose logs -f` |
 
 ## Note
