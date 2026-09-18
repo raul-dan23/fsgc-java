@@ -4,6 +4,26 @@ import { api } from '../api/client.js';
 const DAY_RO = { MONDAY: 'Luni', TUESDAY: 'Marți', WEDNESDAY: 'Miercuri', THURSDAY: 'Joi', FRIDAY: 'Vineri' };
 const DAY_RO_UPPER = { MONDAY: 'LUNI', TUESDAY: 'MARŢI', WEDNESDAY: 'MIERCURI', THURSDAY: 'JOI', FRIDAY: 'VINERI' };
 const WEEK = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+const CATEGORY_RO = { DPPD: 'DPPD', CCOC: 'CCOC', DCT: 'DCT', LIMBI_STRAINE: 'Limbi străine' };
+
+/**
+ * „MD II_gr.2" -> „2"; null pentru o grupă care e tot anul („J II", „MMRPCD2").
+ * Fără \b înaintea lui „gr": grupele se cheamă „J I_gr.1", iar „_" e caracter de cuvânt.
+ */
+const groupNumber = (name) => {
+  const m = /gr(?:upa)?\.?\s*(\d+)\s*$/i.exec(String(name || '').trim());
+  return m ? m[1] : null;
+};
+
+/** SI / SP; nimic pentru o oră care se ține în fiecare săptămână. */
+const parityLabel = (a) => (a.weekParity === 'ODD_WEEKS' ? 'SI'
+  : a.weekParity === 'EVEN_WEEKS' ? 'SP' : '');
+
+/** Unde se ține ora: sala, sau ONLINE pentru activitățile care nu ocupă nicio sală. */
+const roomLabel = (a) => (a.room ? a.room : (a.online ? 'ONLINE' : '—'));
+
+/** Same column key the FSGC grid builds its section headers from. */
+const sectionKeyOf = (g) => `${g.studyProgram}|${g.year}|${g.specialization}`;
 
 const ZOOM_MIN = 0.3;
 const ZOOM_MAX = 1.8;
@@ -13,12 +33,15 @@ export default function TimetablePage() {
   const [schedule, setSchedule] = useState([]);
   const [slots, setSlots] = useState([]);
   const [rooms, setRooms] = useState([]);
+  const [blocks, setBlocks] = useState([]); // blocaje pe interval (DPPD/CCOC/DCT/limbi)
+  const [groups, setGroups] = useState([]); // audiența blocajelor pe specializare + an
   const [view, setView] = useState('group'); // group | room | professor
   const [filter, setFilter] = useState('');
   const [dragId, setDragId] = useState(null);
   const [overCell, setOverCell] = useState(null);
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [zoom, setZoom] = useState(1);
 
   const viewportRef = useRef(null);
@@ -26,10 +49,19 @@ export default function TimetablePage() {
 
   function reload() {
     setLoading(true);
-    Promise.all([api.schedule(), api.timeslots(), api.rooms()]).then(([s, t, r]) => {
+    setLoadError(null);
+    Promise.all([api.schedule(), api.timeslots(), api.rooms(), api.groups(),
+      api.listRule('special-blocks')]).then(([s, t, r, g, b]) => {
       setSchedule(s);
       setSlots(t);
       setRooms(r);
+      setGroups(g || []);
+      setBlocks(b || []);
+      setLoading(false);
+    }).catch((e) => {
+      // Fără asta pagina rămânea agățată în „Se încarcă…” la nesfârșit dacă o singură cerere
+      // pica (backend repornit, de exemplu) — fără niciun mesaj și fără cale de revenire.
+      setLoadError(e.message || 'Backendul nu răspunde.');
       setLoading(false);
     });
   }
@@ -114,11 +146,20 @@ export default function TimetablePage() {
 
   const unplaced = schedule.filter((a) => !a.assigned);
 
-  async function drop(slotId, columnKey) {
+  async function drop(slotId, columnKey, blocked) {
     if (dragId == null) return;
+    if (blocked && blocked.length > 0) {
+      setOverCell(null);
+      setDragId(null);
+      setToast({ ok: false, msg: `Interval blocat (${blockLabel(blocked)}) — aici nu se poate plasa nimic.` });
+      setTimeout(() => setToast(null), 6000);
+      return;
+    }
     const act = schedule.find((a) => a.id === dragId);
     setOverCell(null);
-    const roomId = view === 'room' ? roomIdByName[columnKey] : (act.room ? roomIdByName[act.room] : null);
+    const roomId = act.online ? null
+      : view === 'room' ? roomIdByName[columnKey]
+      : (act.room ? roomIdByName[act.room] : null);
     try {
       const res = await api.move(dragId, slotId, roomId ?? null);
       const v = res.violations;
@@ -132,6 +173,70 @@ export default function TimetablePage() {
     setDragId(null);
     setTimeout(() => setToast(null), 6000);
   }
+
+  /**
+   * slotId -> blocajele care cad pe el, fiecare cu audiența rezolvată în chei de secție și
+   * nume de grupe, ca să putem colora exact celulele afectate din grilă.
+   */
+  const blockIndex = useMemo(() => {
+    const m = new Map();
+    blocks.forEach((r) => {
+      const slotId = r.timeSlot && r.timeSlot.id;
+      if (!slotId) return;
+      let audience = [];
+      if (r.studentGroup) {
+        audience = [r.studentGroup];
+      } else if (r.specialization && r.year != null) {
+        audience = groupsOfSpec(String(r.specialization).toLowerCase(), r.year);
+      }
+      if (audience.length === 0) return; // audiență incompletă — regula nu se aplică la nimic
+      const entry = {
+        category: r.category,
+        // o regulă pe grupă colorează coloana secției, deci spunem pe cine anume vizează
+        scope: r.studentGroup ? r.studentGroup.name : null,
+        sections: new Set(audience.map(sectionKeyOf)),
+        groups: new Set(audience.map((g) => g.name)),
+      };
+      if (!m.has(slotId)) m.set(slotId, []);
+      m.get(slotId).push(entry);
+    });
+    return m;
+  }, [blocks, groups]);
+
+  const groupByName = useMemo(() => new Map(groups.map((g) => [g.name, g])), [groups]);
+
+  function groupsOfSpec(specLower, year) {
+    return groups.filter((g) => g.specialization
+      && g.specialization.toLowerCase() === specLower && g.year === year);
+  }
+
+  /**
+   * „gr. 1" / „gr. 1, 2" pentru celula unei secții: doar grupele acelei secții, fiindcă un curs
+   * comun apare în mai multe coloane, iar numerele altei secții n-ar spune nimic acolo. Gol când
+   * ora e pentru tot anul — atunci coloana spune deja totul.
+   */
+  function groupLabel(a, sec) {
+    const names = (a.groups || []).filter((n) => {
+      const g = groupByName.get(n);
+      return !sec || !g || (g.studyProgram === sec.program && g.year === sec.year
+        && g.specialization === sec.specialization);
+    });
+    const numbers = names.map(groupNumber).filter(Boolean);
+    return numbers.length ? `gr. ${[...new Set(numbers)].join(', ')}` : '';
+  }
+
+  /** Blocajele care acoperă o celulă — cheia e o secție (grila FSGC) sau o grupă (grila simplă). */
+  function blocksAt(slotId, key, byGroup) {
+    const list = blockIndex.get(slotId);
+    if (!list) return [];
+    return list.filter((b) => (byGroup ? b.groups.has(key) : b.sections.has(key)));
+  }
+
+  const blockLabel = (bs) => [...new Set(bs.map((b) => (CATEGORY_RO[b.category] || b.category)
+    + (b.scope ? ` · ${b.scope}` : '')))].join(' / ');
+  /** Intrusă = o activitate a cărei grupă e blocată aici și care nu e din categoria rezervată. */
+  const intrudes = (a, bs) => bs.some((b) => b.category !== a.specialCategory
+    && (a.groups || []).some((g) => b.groups.has(g)));
 
   function actsAt(slotId, sec) {
     return schedule.filter((a) => a.assigned && a.timeSlotId === slotId
@@ -177,6 +282,8 @@ export default function TimetablePage() {
         <div className="legend" style={{ marginTop: 14 }}>
           <span><span className="dot" style={{ background: '#2f5fe0' }} />activitate (trage pentru a muta)</span>
           <span><span className="dot" style={{ background: '#c1352b' }} />conflict / neplasată</span>
+          <span><span className="dot blocked-dot" />interval blocat (nu se alocă nimic)</span>
+          <span><span className="dot" style={{ background: '#0f766e' }} />online (fără sală)</span>
           <span>c = curs · s = seminar · l = laborator</span>
         </div>
         <p className="hint">
@@ -193,11 +300,28 @@ export default function TimetablePage() {
             {unplaced.map((a) => (
               <div key={a.id} className="cell-act violation" draggable
                    onDragStart={() => setDragId(a.id)}>
-                <div className="t">{a.subjectCode} · {a.activityType}</div>
-                <div className="s">{(a.groups || []).join(', ')}</div>
+                <div className="t">
+                  {a.subjectCode} · {abbrev(a.activityType)}
+                  {parityLabel(a) && <span className="parity">{parityLabel(a)}</span>}
+                </div>
+                <div className="s">
+                  {[a.professor, (a.groups || []).join(', ')].filter(Boolean).join(' · ')}
+                </div>
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {loadError && (
+        <div className="panel">
+          <p className="badge bad" style={{ display: 'inline-block' }}>
+            Nu s-au putut încărca datele: {loadError}
+          </p>
+          <p className="muted" style={{ marginBottom: 10 }}>
+            Verifică dacă backendul rulează, apoi încearcă din nou.
+          </p>
+          <button onClick={reload}>Încearcă din nou</button>
         </div>
       )}
 
@@ -254,17 +378,35 @@ export default function TimetablePage() {
                   <td className="tt-col-time">{slot.startTime}–{slot.endTime}</td>
                   {sections.map((sec) => {
                     const acts = actsAt(slot.id, sec);
+                    const blocked = blocksAt(slot.id, sec.key);
+                    const isBlocked = blocked.length > 0;
                     return (
-                      <td key={sec.key} className={`grid-cell${overCell === cellId(sec) ? ' over' : ''}`}
-                          onDragOver={(e) => { e.preventDefault(); setOverCell(cellId(sec)); }}
+                      <td key={sec.key}
+                          className={`grid-cell${isBlocked ? ' blocked' : ''}${overCell === cellId(sec) ? ' over' : ''}`}
+                          title={isBlocked ? `Interval blocat pentru ${blockLabel(blocked)}` : undefined}
+                          onDragOver={(e) => {
+                            if (isBlocked) return; // fără preventDefault → drop refuzat de browser
+                            e.preventDefault();
+                            setOverCell(cellId(sec));
+                          }}
                           onDragLeave={() => setOverCell(null)}
-                          onDrop={() => drop(slot.id, sec.specialization)}>
+                          onDrop={() => drop(slot.id, sec.specialization, blocked)}>
+                        {isBlocked && <div className="cell-block">{blockLabel(blocked)}</div>}
                         {acts.map((a) => (
-                          <div key={a.id} className="cell-act" draggable
+                          <div key={a.id}
+                               className={`cell-act${isBlocked && intrudes(a, blocked) ? ' violation' : ''}`
+                                 + (a.online ? ' online' : '')}
+                               draggable
                                onDragStart={() => setDragId(a.id)}
-                               title={`${a.subject} · ${a.professor || ''} · ${a.room}`}>
+                               title={[a.subject, a.professor, abbrev(a.activityType),
+                                 groupLabel(a, sec), parityLabel(a), roomLabel(a)]
+                                 .filter(Boolean).join(' · ')}>
                             <div className="t">{a.subject}</div>
-                            <div className="s">{a.professor || ''} · {abbrev(a.activityType)}</div>
+                            <div className="s">
+                              {[a.professor, abbrev(a.activityType), groupLabel(a, sec)]
+                                .filter(Boolean).join(' · ')}
+                              {parityLabel(a) && <span className="parity">{parityLabel(a)}</span>}
+                            </div>
                           </div>
                         ))}
                       </td>
@@ -275,9 +417,13 @@ export default function TimetablePage() {
                   <td className="tt-col-time tt-room">Sala</td>
                   {sections.map((sec) => {
                     const acts = actsAt(slot.id, sec);
+                    const isBlocked = blocksAt(slot.id, sec.key).length > 0;
                     return (
-                      <td key={sec.key} className="grid-cell tt-room">
-                        {acts.map((a) => a.room).filter(Boolean).join(' / ')}
+                      <td key={sec.key} className={`grid-cell tt-room${isBlocked ? ' blocked' : ''}`}>
+                        {acts.map((a) => (a.online
+                          ? <span key={a.id} className="online-tag">ONLINE</span>
+                          : <span key={a.id}>{a.room}</span>))
+                          .reduce((out, el) => (out.length ? [...out, ' / ', el] : [el]), [])}
                       </td>
                     );
                   })}
@@ -309,16 +455,34 @@ export default function TimetablePage() {
               {columns.map((c) => {
                 const cellId = `${s.id}|${c}`;
                 const acts = schedule.filter((a) => a.assigned && a.timeSlotId === s.id && keysFor(a, view).includes(c));
+                // blocajele au audiență pe grupe, deci se pot marca doar în vizualizarea pe grupă
+                const blocked = view === 'group' ? blocksAt(s.id, c, true) : [];
+                const isBlocked = blocked.length > 0;
                 return (
-                  <td key={c} className={`grid-cell${overCell === cellId ? ' over' : ''}`}
-                      onDragOver={(e) => { e.preventDefault(); setOverCell(cellId); }}
+                  <td key={c}
+                      className={`grid-cell${isBlocked ? ' blocked' : ''}${overCell === cellId ? ' over' : ''}`}
+                      title={isBlocked ? `Interval blocat pentru ${blockLabel(blocked)}` : undefined}
+                      onDragOver={(e) => {
+                        if (isBlocked) return;
+                        e.preventDefault();
+                        setOverCell(cellId);
+                      }}
                       onDragLeave={() => setOverCell(null)}
-                      onDrop={() => drop(s.id, c)}>
+                      onDrop={() => drop(s.id, c, blocked)}>
+                    {isBlocked && <div className="cell-block">{blockLabel(blocked)}</div>}
                     {acts.map((a) => (
-                      <div key={a.id} className="cell-act" draggable
+                      <div key={a.id}
+                           className={`cell-act${isBlocked && intrudes(a, blocked) ? ' violation' : ''}`
+                             + (a.online ? ' online' : '')}
+                           draggable
                            onDragStart={() => setDragId(a.id)}
-                           title={`${a.subject} · ${a.professor || ''} · ${a.room}`}>
-                        <div className="t">{a.subjectCode} · {abbrev(a.activityType)}</div>
+                           title={[a.subject, a.professor, abbrev(a.activityType),
+                             groupLabel(a), parityLabel(a), roomLabel(a)]
+                             .filter(Boolean).join(' · ')}>
+                        <div className="t">
+                          {a.subjectCode} · {abbrev(a.activityType)}
+                          {parityLabel(a) && <span className="parity">{parityLabel(a)}</span>}
+                        </div>
                         <div className="s">{secondary(a, view)}</div>
                       </div>
                     ))}
@@ -348,12 +512,12 @@ function abbrev(type) {
 
 function keysFor(a, view) {
   if (view === 'group') return a.groups && a.groups.length ? a.groups : ['(fără grupă)'];
-  if (view === 'room') return [a.room];
+  if (view === 'room') return [roomLabel(a)];
   return [a.professor || '(fără profesor)'];
 }
 
 function secondary(a, view) {
-  if (view === 'group') return `${a.professor || ''} · ${a.room}`;
+  if (view === 'group') return `${a.professor || ''} · ${roomLabel(a)}`;
   if (view === 'room') return (a.groups || []).join(', ');
-  return `${a.room} · ${(a.groups || []).join(', ')}`;
+  return `${roomLabel(a)} · ${(a.groups || []).join(', ')}`;
 }

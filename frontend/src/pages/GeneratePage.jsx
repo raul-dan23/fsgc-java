@@ -46,8 +46,10 @@ export default function GeneratePage() {
    */
   const loadLive = useCallback(async () => {
     try {
-      const acts = await api.activities();
-      const placed = acts.filter((a) => a.room && a.day).length;
+      // api.schedule(), not api.activities(): only the schedule view carries `assigned`, which
+      // knows that an online hour is placed without a room. The admin list has no such field.
+      const acts = await api.schedule();
+      const placed = acts.filter((a) => a.assigned).length;
       setLive({ placed, total: acts.length });
       setUnassigned(placed === acts.length ? [] : await api.unassignedDetails());
     } catch {
@@ -216,12 +218,12 @@ function summarize(unassigned) {
 function familyOf(v) {
   if (v.startsWith('capacitate')) return 'capacity';
   if (v === 'necesită amfiteatru') return 'amphi';
+  if (v === 'necesită laborator') return 'lab';
   if (v === 'sala indisponibilă') return 'roomUnavail';
   if (v.startsWith('master')) return 'master';
   if (v.startsWith('zi blocată')) return 'blockedDay';
   if (v.startsWith('interval rezervat')) return 'special';
   if (v.startsWith('cadrul didactic este indisponibil')) return 'profUnavail';
-  if (v.startsWith('sală interzisă') || v.startsWith('cadrul didactic poate preda')) return 'profRoom';
   if (v.startsWith('sala e ocupată')) return 'roomBusy';
   if (v.startsWith('grupa are deja')) return 'groupBusy';
   if (v.startsWith('cadrul didactic predă')) return 'profBusy';
@@ -264,10 +266,10 @@ const ADVICE = {
     what: 'Intervalele rămase libere sunt exact cele în care cadrul didactic nu poate preda.',
     how: 'Restrânge intervalul din Constrângeri sau repartizează ora altui cadru didactic.',
   },
-  profRoom: {
-    title: 'Restricțiile de sală ale cadrelor didactice',
-    what: 'Cadrul didactic e legat de o sală care nu era liberă, sau îi este interzisă sala disponibilă.',
-    how: 'Ridică restricția din Constrângeri dacă nu mai e necesară.',
+  lab: {
+    title: 'Orele de laborator cer laborator',
+    what: 'Activitatea e bifată „Laborator”, iar laboratoarele libere nu se potrivesc cu intervalul.',
+    how: 'Eliberează un laborator în acel interval sau scoate bifa din Administrare dacă ora se poate ține oriunde.',
   },
   roomBusy: {
     title: 'Sălile sunt deja ocupate',

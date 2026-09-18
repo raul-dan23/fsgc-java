@@ -10,7 +10,6 @@ import ai.timefold.solver.core.api.score.buildin.hardmediumsoft.HardMediumSoftSc
 import java.util.ArrayList;
 import java.util.List;
 import ro.uvt.fsgc.orar.domain.BlockedDayRule;
-import ro.uvt.fsgc.orar.domain.ProfessorRoomRestriction;
 import ro.uvt.fsgc.orar.domain.ProfessorUnavailability;
 import ro.uvt.fsgc.orar.domain.Room;
 import ro.uvt.fsgc.orar.domain.ScheduledActivity;
@@ -47,9 +46,6 @@ public class TimetableSolution {
 
     @ProblemFactCollectionProperty
     private List<ProfessorUnavailability> professorUnavailabilities = new ArrayList<>();
-
-    @ProblemFactCollectionProperty
-    private List<ProfessorRoomRestriction> professorRoomRestrictions = new ArrayList<>();
 
     @ConstraintConfigurationProvider
     private TimetableConstraintConfiguration constraintConfiguration = new TimetableConstraintConfiguration();
@@ -114,14 +110,6 @@ public class TimetableSolution {
 
     public void setProfessorUnavailabilities(List<ProfessorUnavailability> professorUnavailabilities) {
         this.professorUnavailabilities = professorUnavailabilities;
-    }
-
-    public List<ProfessorRoomRestriction> getProfessorRoomRestrictions() {
-        return professorRoomRestrictions;
-    }
-
-    public void setProfessorRoomRestrictions(List<ProfessorRoomRestriction> professorRoomRestrictions) {
-        this.professorRoomRestrictions = professorRoomRestrictions;
     }
 
     public TimetableConstraintConfiguration getConstraintConfiguration() {

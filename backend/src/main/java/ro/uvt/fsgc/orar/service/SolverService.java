@@ -137,7 +137,7 @@ public class SolverService {
             int violatedHard = (int) sm.analyze(solved).constraintAnalyses().stream()
                     .filter(ca -> ca.score().hardScore() < 0).count();
             int unassigned = (int) solved.getActivities().stream()
-                    .filter(a -> a.getTimeSlot() == null || a.getRoom() == null).count();
+                    .filter(a -> !a.isPlaced()).count();
             rows.add(new CompareResultDto(seconds, millis, score.toString(),
                     score.hardScore(), score.mediumScore(), score.softScore(), unassigned, violatedHard));
         }
@@ -169,7 +169,7 @@ public class SolverService {
         job.setTotalActivities(solved.getActivities().size());
 
         int unassigned = (int) solved.getActivities().stream()
-                .filter(a -> a.getTimeSlot() == null || a.getRoom() == null).count();
+                .filter(a -> !a.isPlaced()).count();
         job.setUnassignedCount(unassigned);
 
         job.setActivities(solved.getActivities().stream().map(this::toView).collect(Collectors.toList()));
@@ -217,6 +217,11 @@ public class SolverService {
                     "Cursurile de amfiteatru cer amfiteatru",
                     "O activitate marcată „Curs Amfiteatru” a primit o sală obișnuită.",
                     "Eliberează un amfiteatru în acel interval sau scoate cerința de amfiteatru din Administrare."};
+            case "Lab required" -> new String[] {
+                    "Activitățile de laborator cer sală de laborator",
+                    "O activitate bifată „Laborator” a primit o sală obișnuită.",
+                    "Eliberează un laborator în acel interval sau scoate bifa din Administrare"
+                            + " dacă ora se poate ține în orice sală."};
             case "Room availability" -> new String[] {
                     "Sala trebuie să fie disponibilă",
                     "Ora a căzut într-un interval în care sala e marcată indisponibilă.",
@@ -237,14 +242,29 @@ public class SolverService {
                     "Cadrele didactice nu se programează când sunt indisponibile",
                     "Ora cade peste un interval declarat indisponibil pentru acel cadru didactic.",
                     "Restrânge indisponibilitatea din Constrângeri sau mută ora."};
-            case "Professor forbidden room" -> new String[] {
-                    "Sălile interzise unui cadru didactic",
-                    "Ora a primit o sală marcată ca interzisă pentru acel cadru didactic.",
-                    "Alege altă sală sau ridică restricția din Constrângeri."};
-            case "Professor only-this room" -> new String[] {
-                    "Cadre didactice legate de o singură sală",
-                    "Cadrul didactic poate preda doar într-o anumită sală, iar aceasta nu era liberă.",
-                    "Eliberează sala respectivă sau ridică restricția din Constrângeri."};
+            case "Professor day holds together" -> new String[] {
+                    "Ziua unui cadru didactic nu se sparge",
+                    "Un cadru didactic ar avea ore răsfirate: până în 3 module ziua trebuie să fie"
+                            + " compactă, de la 4 module e permisă o singură fereastră de un modul.",
+                    "Mută una dintre ore lângă celelalte sau în altă zi."};
+            case "At most three teaching days a week" -> new String[] {
+                    "Cel mult 3 zile pe săptămână la facultate",
+                    "Un cadru didactic ar veni în mai mult de 3 zile, uneori pentru un singur modul.",
+                    "Grupează-i orele în mai puține zile; e o preferință, nu o regulă absolută."};
+            case "At most five modules a day per group" -> new String[] {
+                    "O grupă nu stă mai mult de 5 module pe zi",
+                    "O grupă ar avea peste 5 module într-o singură zi (cursuri și seminarii la un loc).",
+                    "Mută ore în alte zile; dacă grupa are prea multe ore pe săptămână, verifică"
+                            + " în Administrare dacă nu s-au creat activități în plus."};
+            case "Time to walk to a far room" -> new String[] {
+                    "Drumul până la P01 nu încape în pauză",
+                    "O grupă ar avea un modul în P01 și modulul lipit imediat în altă sală —"
+                            + " sunt circa 20 de minute de mers, iar pauza e de 10.",
+                    "Lasă un modul liber între ele, ține ambele ore în P01, sau mută una în altă zi."};
+            case "Online activity takes no room" -> new String[] {
+                    "Orele online nu ocupă săli",
+                    "O activitate marcată online a primit totuși o sală.",
+                    "Scoate marcajul „Online” din Administrare dacă ora se ține de fapt în sală."};
             case "Consecutive slots same building" -> new String[] {
                     "Ore consecutive în aceeași clădire",
                     "O grupă ar trebui să schimbe clădirea între două ore lipite.",

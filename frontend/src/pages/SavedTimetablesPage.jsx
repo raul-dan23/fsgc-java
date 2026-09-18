@@ -74,7 +74,7 @@ export default function SavedTimetablesPage() {
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
-  const assigned = current ? current.filter((a) => a.room).length : 0;
+  const assigned = current ? current.filter((a) => a.assigned).length : 0;
   const total = current ? current.length : 0;
 
   if (!rows) return <p className="muted">Se încarcă…</p>;

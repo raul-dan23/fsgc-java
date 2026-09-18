@@ -42,6 +42,10 @@ public class WeightsController {
         w.setProfessorPreference(incoming.getProfessorPreference());
         w.setParityPairTogether(incoming.getParityPairTogether());
         w.setRoomOversize(incoming.getRoomOversize());
+        w.setFarRoomCommute(incoming.getFarRoomCommute());
+        w.setProfessorWeekDays(incoming.getProfessorWeekDays());
+        // Adding a weight means adding a line here too, or the slider saves nothing.
+        // WeightsRoundTripTest fails loudly when one is forgotten.
         return ResponseEntity.ok(repo.save(w));
     }
 }

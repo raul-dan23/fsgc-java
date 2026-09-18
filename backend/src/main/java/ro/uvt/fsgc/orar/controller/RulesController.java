@@ -2,10 +2,15 @@ package ro.uvt.fsgc.orar.controller;
 
 import java.time.DayOfWeek;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -13,17 +18,16 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import ro.uvt.fsgc.orar.domain.BlockedDayRule;
-import ro.uvt.fsgc.orar.domain.ProfessorRoomRestriction;
 import ro.uvt.fsgc.orar.domain.ProfessorUnavailability;
-import ro.uvt.fsgc.orar.domain.RestrictionType;
 import ro.uvt.fsgc.orar.domain.RoomAvailability;
 import ro.uvt.fsgc.orar.domain.RoomUnavailability;
 import ro.uvt.fsgc.orar.domain.SpecialBlockRule;
 import ro.uvt.fsgc.orar.domain.SpecialCategory;
+import ro.uvt.fsgc.orar.domain.StudentGroup;
 import ro.uvt.fsgc.orar.domain.StudyProgram;
+import ro.uvt.fsgc.orar.domain.TimeSlot;
 import ro.uvt.fsgc.orar.repository.BlockedDayRuleRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorRepository;
-import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorUnavailabilityRepository;
 import ro.uvt.fsgc.orar.repository.RoomAvailabilityRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
@@ -45,7 +49,6 @@ public class RulesController {
     private final BlockedDayRuleRepository blockedDayRepo;
     private final SpecialBlockRuleRepository specialBlockRepo;
     private final ProfessorUnavailabilityRepository profUnavailRepo;
-    private final ProfessorRoomRestrictionRepository profRoomRepo;
     private final RoomAvailabilityRepository roomAvailRepo;
     private final RoomUnavailabilityRepository roomUnavailRepo;
     private final ProfessorRepository professorRepo;
@@ -55,7 +58,6 @@ public class RulesController {
 
     public RulesController(BlockedDayRuleRepository blockedDayRepo, SpecialBlockRuleRepository specialBlockRepo,
                           ProfessorUnavailabilityRepository profUnavailRepo,
-                          ProfessorRoomRestrictionRepository profRoomRepo,
                           RoomAvailabilityRepository roomAvailRepo,
                           RoomUnavailabilityRepository roomUnavailRepo, ProfessorRepository professorRepo,
                           RoomRepository roomRepo, StudentGroupRepository groupRepo,
@@ -63,7 +65,6 @@ public class RulesController {
         this.blockedDayRepo = blockedDayRepo;
         this.specialBlockRepo = specialBlockRepo;
         this.profUnavailRepo = profUnavailRepo;
-        this.profRoomRepo = profRoomRepo;
         this.roomAvailRepo = roomAvailRepo;
         this.roomUnavailRepo = roomUnavailRepo;
         this.professorRepo = professorRepo;
@@ -134,6 +135,126 @@ public class RulesController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * Bulk add: one rule for every (audience x interval) pair. The audience is either an explicit
+     * list of groups, or a whole study program + year — optionally narrowed to some of its
+     * specializations. Pairs that already exist are skipped, so the call is safe to repeat.
+     */
+    public record SpecialBlockBulkReq(SpecialCategory category, StudyProgram studyProgram, Integer year,
+                                      List<String> specializations, List<Long> studentGroupIds,
+                                      List<Long> timeSlotIds, String semester, String academicYear) {
+    }
+
+    /** What a bulk add actually did: the new rules, plus how many were already there. */
+    public record SpecialBlockBulkResult(List<SpecialBlockRule> created, int skipped) {
+    }
+
+    @PostMapping("/special-blocks/bulk")
+    public SpecialBlockBulkResult addSpecialBlocks(@RequestBody SpecialBlockBulkReq req) {
+        if (req.category() == null) {
+            throw new IllegalArgumentException("Alege categoria blocajului.");
+        }
+        if (req.timeSlotIds() == null || req.timeSlotIds().isEmpty()) {
+            throw new IllegalArgumentException("Alege cel puțin un interval orar.");
+        }
+        List<TimeSlot> slots = req.timeSlotIds().stream().distinct()
+                .map(id -> timeSlotRepo.findById(id).orElseThrow(() ->
+                        new IllegalArgumentException("Interval inexistent: " + id)))
+                .sorted(Comparator.comparing(TimeSlot::getDayOfWeek).thenComparing(TimeSlot::getSlotIndex))
+                .toList();
+
+        List<StudentGroup> groups = req.studentGroupIds() == null ? List.of()
+                : req.studentGroupIds().stream().distinct()
+                .map(id -> groupRepo.findById(id).orElseThrow(() ->
+                        new IllegalArgumentException("Grupă inexistentă: " + id)))
+                .toList();
+        List<String> specs = groups.isEmpty()
+                ? specializationsOf(req.studyProgram(), req.year(), req.specializations())
+                : List.of();
+        if (groups.isEmpty() && specs.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Alege audiența: una sau mai multe grupe, ori un program de studiu + an.");
+        }
+
+        List<SpecialBlockRule> existing = specialBlockRepo.findAll();
+        List<SpecialBlockRule> created = new ArrayList<>();
+        int skipped = 0;
+        for (TimeSlot ts : slots) {
+            for (StudentGroup g : groups) {
+                if (alreadyBlocked(existing, req.category(), ts, g, null, null)) {
+                    skipped++;
+                    continue;
+                }
+                created.add(newBlock(req, ts, g, null, null));
+            }
+            for (String spec : specs) {
+                if (alreadyBlocked(existing, req.category(), ts, null, spec, req.year())) {
+                    skipped++;
+                    continue;
+                }
+                created.add(newBlock(req, ts, null, spec, req.year()));
+            }
+        }
+        return new SpecialBlockBulkResult(specialBlockRepo.saveAll(created), skipped);
+    }
+
+    /** Bulk delete, so undoing a whole year's worth of blocks is one click and not twenty. */
+    @DeleteMapping("/special-blocks")
+    public Map<String, Integer> deleteSpecialBlocks(@RequestBody List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Map.of("deleted", 0);
+        }
+        List<SpecialBlockRule> hit = specialBlockRepo.findAllById(ids);
+        specialBlockRepo.deleteAll(hit);
+        return Map.of("deleted", hit.size());
+    }
+
+    /** The specializations of a program + year, narrowed to {@code wanted} when that is given. */
+    private List<String> specializationsOf(StudyProgram program, Integer year, List<String> wanted) {
+        if (program == null || year == null) {
+            return List.of();
+        }
+        return groupRepo.findAll().stream()
+                .filter(g -> g.getStudyProgram() == program && g.getYear() == year)
+                .map(StudentGroup::getSpecialization)
+                .filter(sp -> sp != null && !sp.isBlank())
+                .filter(sp -> wanted == null || wanted.isEmpty()
+                        || wanted.stream().anyMatch(w -> w.equalsIgnoreCase(sp)))
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
+    private SpecialBlockRule newBlock(SpecialBlockBulkReq req, TimeSlot ts, StudentGroup group,
+                                      String specialization, Integer year) {
+        SpecialBlockRule r = new SpecialBlockRule();
+        r.setStudentGroup(group);
+        r.setSpecialization(specialization);
+        r.setYear(group == null ? year : null);
+        r.setDayOfWeek(ts.getDayOfWeek());
+        r.setTimeSlot(ts);
+        r.setCategory(req.category());
+        r.setSemester(req.semester());
+        r.setAcademicYear(req.academicYear());
+        return r;
+    }
+
+    private static boolean alreadyBlocked(List<SpecialBlockRule> existing, SpecialCategory category,
+                                          TimeSlot ts, StudentGroup group, String specialization,
+                                          Integer year) {
+        return existing.stream().anyMatch(r -> r.getCategory() == category
+                && r.getTimeSlot() != null && r.getTimeSlot().getId().equals(ts.getId())
+                && (group != null
+                ? r.getStudentGroup() != null && r.getStudentGroup().getId().equals(group.getId())
+                : r.getStudentGroup() == null && specialization.equalsIgnoreCase(r.getSpecialization())
+                        && year != null && year.equals(r.getYear())));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    ResponseEntity<Map<String, String>> onBadRequest(IllegalArgumentException e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("message", e.getMessage()));
+    }
+
     // ---------------- professor unavailability ----------------
 
     public record ProfUnavailReq(Long professorId, DayOfWeek dayOfWeek, LocalTime startTime, LocalTime endTime) {
@@ -157,31 +278,6 @@ public class RulesController {
     @DeleteMapping("/professor-unavailabilities/{id}")
     public ResponseEntity<Void> deleteProfUnavail(@PathVariable Long id) {
         profUnavailRepo.deleteById(id);
-        return ResponseEntity.noContent().build();
-    }
-
-    // ---------------- professor-room restriction ----------------
-
-    public record ProfRoomReq(Long professorId, Long roomId, RestrictionType restrictionType) {
-    }
-
-    @GetMapping("/professor-room-restrictions")
-    public List<ProfessorRoomRestriction> profRoomRestrictions() {
-        return profRoomRepo.findAll();
-    }
-
-    @PostMapping("/professor-room-restrictions")
-    public ProfessorRoomRestriction addProfRoom(@RequestBody ProfRoomReq req) {
-        ProfessorRoomRestriction r = new ProfessorRoomRestriction();
-        r.setProfessor(professorRepo.findById(req.professorId()).orElseThrow());
-        r.setRoom(roomRepo.findById(req.roomId()).orElseThrow());
-        r.setRestrictionType(req.restrictionType());
-        return profRoomRepo.save(r);
-    }
-
-    @DeleteMapping("/professor-room-restrictions/{id}")
-    public ResponseEntity<Void> deleteProfRoom(@PathVariable Long id) {
-        profRoomRepo.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 

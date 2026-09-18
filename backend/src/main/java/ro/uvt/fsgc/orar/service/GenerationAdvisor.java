@@ -11,24 +11,21 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ro.uvt.fsgc.orar.domain.BlockedDayRule;
-import ro.uvt.fsgc.orar.domain.ProfessorRoomRestriction;
 import ro.uvt.fsgc.orar.domain.ProfessorUnavailability;
-import ro.uvt.fsgc.orar.domain.RestrictionType;
 import ro.uvt.fsgc.orar.domain.Room;
 import ro.uvt.fsgc.orar.domain.RoomTypology;
 import ro.uvt.fsgc.orar.domain.ScheduledActivity;
 import ro.uvt.fsgc.orar.domain.SpecialBlockRule;
-import ro.uvt.fsgc.orar.domain.SpecialCategory;
 import ro.uvt.fsgc.orar.domain.StudentGroup;
 import ro.uvt.fsgc.orar.domain.TimeSlot;
 import ro.uvt.fsgc.orar.dto.BudgetAdvice;
 import ro.uvt.fsgc.orar.dto.UnassignedDiagnostic;
 import ro.uvt.fsgc.orar.repository.BlockedDayRuleRepository;
-import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorUnavailabilityRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
 import ro.uvt.fsgc.orar.repository.ScheduledActivityRepository;
 import ro.uvt.fsgc.orar.repository.SpecialBlockRuleRepository;
+import ro.uvt.fsgc.orar.solver.TimetableConstraintProvider;
 import ro.uvt.fsgc.orar.repository.TimeSlotRepository;
 
 /**
@@ -41,6 +38,9 @@ public class GenerationAdvisor {
 
     private static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm");
     /** Budgets offered to the user; the recommendation is rounded up to one of these. */
+    /** Monday to Friday: the timetable has no weekend. */
+    private static final int WEEKDAYS = 5;
+
     private static final int[] LADDER = {30, 60, 90, 120, 180, 300, 600, 900};
 
     private final ScheduledActivityRepository activityRepo;
@@ -49,20 +49,17 @@ public class GenerationAdvisor {
     private final BlockedDayRuleRepository blockedDayRepo;
     private final SpecialBlockRuleRepository specialBlockRepo;
     private final ProfessorUnavailabilityRepository profUnavailRepo;
-    private final ProfessorRoomRestrictionRepository profRoomRepo;
 
     public GenerationAdvisor(ScheduledActivityRepository activityRepo, RoomRepository roomRepo,
                              TimeSlotRepository timeSlotRepo, BlockedDayRuleRepository blockedDayRepo,
                              SpecialBlockRuleRepository specialBlockRepo,
-                             ProfessorUnavailabilityRepository profUnavailRepo,
-                             ProfessorRoomRestrictionRepository profRoomRepo) {
+                             ProfessorUnavailabilityRepository profUnavailRepo) {
         this.activityRepo = activityRepo;
         this.roomRepo = roomRepo;
         this.timeSlotRepo = timeSlotRepo;
         this.blockedDayRepo = blockedDayRepo;
         this.specialBlockRepo = specialBlockRepo;
         this.profUnavailRepo = profUnavailRepo;
-        this.profRoomRepo = profRoomRepo;
     }
 
     // ============================================================ budget advice
@@ -90,7 +87,10 @@ public class GenerationAdvisor {
         }
 
         int roomSlots = nR * nS;
-        double occupancy = (double) nA / roomSlots;
+        // Online hours take an hour but no room, so they weigh on the groups and the professors,
+        // never on the rooms: counting them here would overstate how tight the rooms are.
+        int onSite = (int) activities.stream().filter(a -> !a.isOnline()).count();
+        double occupancy = (double) onSite / roomSlots;
 
         Map<Long, Integer> perGroup = new HashMap<>();
         Map<Long, Integer> perProfessor = new HashMap<>();
@@ -103,7 +103,7 @@ public class GenerationAdvisor {
             if (a.getProfessor() != null) {
                 perProfessor.merge(a.getProfessor().getId(), 1, Integer::sum);
             }
-            if (a.isRequiresAmphitheater()) {
+            if (a.isRequiresAmphitheater() && !a.isOnline()) {
                 amphiDemand++;
             }
             if (a.isMaster()) {
@@ -115,7 +115,9 @@ public class GenerationAdvisor {
         int amphiRooms = (int) rooms.stream().filter(r -> r.getTypology() == RoomTypology.AMPHITHEATER).count();
         int eveningSlots = (int) slots.stream().filter(TimeSlot::isEveningModule).count();
 
-        double groupPressure = (double) maxGroupLoad / nS;
+        // A group cannot use every module of the week: at most five a day, five days.
+        int groupCeiling = Math.min(nS, TimetableConstraintProvider.MAX_MODULES_A_DAY * WEEKDAYS);
+        double groupPressure = (double) maxGroupLoad / groupCeiling;
         double profPressure = (double) maxProfLoad / nS;
         double amphiPressure = amphiRooms == 0 ? (amphiDemand > 0 ? 2.0 : 0)
                 : (double) amphiDemand / (amphiRooms * nS);
@@ -135,12 +137,17 @@ public class GenerationAdvisor {
         int thorough = ladder(recommended * 3);
 
         List<String> reasons = new ArrayList<>();
+        reasons.add(nA == onSite
+                ? String.format("%d activități pe %d săli × %d module = %d combinații (ocupare %.0f%%).",
+                        nA, nR, nS, roomSlots, occupancy * 100)
+                : String.format("%d activități, din care %d în sală, pe %d săli × %d module = %d"
+                                + " combinații (ocupare %.0f%%). Cele %d ore online nu ocupă sală.",
+                        nA, onSite, nR, nS, roomSlots, occupancy * 100, nA - onSite));
         reasons.add(String.format(
-                "%d activități pe %d săli × %d module = %d combinații (ocupare %.0f%%).",
-                nA, nR, nS, roomSlots, occupancy * 100));
-        reasons.add(String.format(
-                "Grupa cea mai încărcată are %d activități din %d module posibile (%.0f%%).",
-                maxGroupLoad, nS, groupPressure * 100));
+                "Grupa cea mai încărcată are %d activități din %d module posibile pe săptămână"
+                        + " (%.0f%%), la cel mult %d module pe zi.",
+                maxGroupLoad, groupCeiling, groupPressure * 100,
+                TimetableConstraintProvider.MAX_MODULES_A_DAY));
         reasons.add(String.format(
                 "Cadrul didactic cel mai încărcat are %d activități din %d module (%.0f%%).",
                 maxProfLoad, nS, profPressure * 100));
@@ -176,28 +183,43 @@ public class GenerationAdvisor {
     }
 
     /** Impossibilities that more solving time cannot fix; each needs a data change instead. */
-    private List<String> structuralBlockers(List<ScheduledActivity> activities, List<Room> rooms,
-                                            int nS, int eveningSlots, int amphiRooms) {
+    static List<String> structuralBlockers(List<ScheduledActivity> activities, List<Room> rooms,
+                                           int nS, int eveningSlots, int amphiRooms) {
         // LinkedHashSet: a subject with several activities would otherwise repeat the same line
         java.util.Set<String> blockers = new java.util.LinkedHashSet<>();
         int maxCapacity = rooms.stream().mapToInt(Room::getCapacity).max().orElse(0);
         int maxAmphi = rooms.stream().filter(r -> r.getTypology() == RoomTypology.AMPHITHEATER)
                 .mapToInt(Room::getCapacity).max().orElse(0);
+        int maxLab = rooms.stream().filter(r -> r.getTypology() == RoomTypology.LAB)
+                .mapToInt(Room::getCapacity).max().orElse(0);
+        long labRooms = rooms.stream().filter(r -> r.getTypology() == RoomTypology.LAB).count();
 
         for (ScheduledActivity a : activities) {
+            if (a.isOnline()) {
+                continue; // holds no room, so no room is too small for it
+            }
             int students = a.totalStudentCount();
             if (students > maxCapacity) {
                 blockers.add(String.format(
-                        "„%s” are %d studenți, dar cea mai mare sală are %d locuri.",
+                        "„%s” are %d studenți, dar cea mai mare sală are %d locuri."
+                                + " Împarte grupele sau, dacă ora se ține online, bifează"
+                                + " „Online” la activitate în Administrare.",
                         a.getSubject().getName(), students, maxCapacity));
             } else if (a.isRequiresAmphitheater() && students > maxAmphi) {
                 blockers.add(String.format(
                         "„%s” cere amfiteatru pentru %d studenți, dar cel mai mare amfiteatru are %d locuri.",
                         a.getSubject().getName(), students, maxAmphi));
+            } else if (a.isRequiresLab() && students > maxLab) {
+                blockers.add(String.format(
+                        "„%s” cere laborator pentru %d studenți, dar cel mai mare laborator are %d locuri.",
+                        a.getSubject().getName(), students, maxLab));
             }
         }
         if (amphiRooms == 0 && activities.stream().anyMatch(ScheduledActivity::isRequiresAmphitheater)) {
             blockers.add("Există activități care cer amfiteatru, dar nicio sală nu e de tip amfiteatru.");
+        }
+        if (labRooms == 0 && activities.stream().anyMatch(ScheduledActivity::isRequiresLab)) {
+            blockers.add("Există activități care cer laborator, dar nicio sală nu e de tip laborator.");
         }
 
         Map<Long, Integer> perGroup = new HashMap<>();
@@ -212,11 +234,14 @@ public class GenerationAdvisor {
                 }
             }
         }
+        int weekCeiling = Math.min(nS, TimetableConstraintProvider.MAX_MODULES_A_DAY * WEEKDAYS);
         perGroup.forEach((id, count) -> {
-            if (count > nS) {
+            if (count > weekCeiling) {
                 blockers.add(String.format(
-                        "Grupa %s are %d activități, dar săptămâna are doar %d module.",
-                        groupNames.get(id), count, nS));
+                        "Grupa %s are %d activități, dar o grupă stă cel mult %d module pe zi,"
+                                + " adică %d pe săptămână.",
+                        groupNames.get(id), count, TimetableConstraintProvider.MAX_MODULES_A_DAY,
+                        weekCeiling));
             }
         });
         masterPerGroup.forEach((id, count) -> {
@@ -256,7 +281,7 @@ public class GenerationAdvisor {
     public List<UnassignedDiagnostic> diagnoseUnassigned() {
         List<ScheduledActivity> all = activityRepo.findAll();
         List<ScheduledActivity> unplaced = all.stream()
-                .filter(a -> a.getTimeSlot() == null || a.getRoom() == null)
+                .filter(a -> !a.isPlaced())
                 .toList();
         if (unplaced.isEmpty()) {
             return List.of();
@@ -266,11 +291,10 @@ public class GenerationAdvisor {
         List<BlockedDayRule> blockedDays = blockedDayRepo.findAll();
         List<SpecialBlockRule> specialBlocks = specialBlockRepo.findAll();
         List<ProfessorUnavailability> profUnavail = profUnavailRepo.findAll();
-        List<ProfessorRoomRestriction> profRooms = profRoomRepo.findAll();
 
         List<UnassignedDiagnostic> out = new ArrayList<>();
         for (ScheduledActivity a : unplaced) {
-            out.add(diagnoseOne(a, all, rooms, slots, blockedDays, specialBlocks, profUnavail, profRooms));
+            out.add(diagnoseOne(a, all, rooms, slots, blockedDays, specialBlocks, profUnavail));
         }
         return out;
     }
@@ -279,21 +303,22 @@ public class GenerationAdvisor {
                                              List<Room> rooms, List<TimeSlot> slots,
                                              List<BlockedDayRule> blockedDays,
                                              List<SpecialBlockRule> specialBlocks,
-                                             List<ProfessorUnavailability> profUnavail,
-                                             List<ProfessorRoomRestriction> profRooms) {
+                                             List<ProfessorUnavailability> profUnavail) {
         int students = a.totalStudentCount();
         List<String> groupNames = a.getStudentGroups().stream()
                 .map(StudentGroup::getName).sorted().toList();
 
         List<UnassignedDiagnostic.PlacementOption> options = new ArrayList<>();
+        // An online hour takes no room, so its only choice is the interval.
+        List<Room> candidates = a.isOnline() ? Collections.singletonList(null) : rooms;
         for (TimeSlot ts : slots) {
-            for (Room room : rooms) {
+            for (Room room : candidates) {
                 List<String> v = violationsFor(a, ts, room, all, blockedDays, specialBlocks,
-                        profUnavail, profRooms);
+                        profUnavail);
                 options.add(new UnassignedDiagnostic.PlacementOption(
                         ts.getDayOfWeek().name(), ts.getSlotIndex(),
                         ts.getStartTime().format(HM) + " – " + ts.getEndTime().format(HM),
-                        room.getName(), v));
+                        room == null ? "ONLINE" : room.getName(), v));
             }
         }
         options.sort(Comparator.comparingInt(o -> o.violations().size()));
@@ -330,20 +355,25 @@ public class GenerationAdvisor {
     private List<String> violationsFor(ScheduledActivity a, TimeSlot ts, Room room,
                                        List<ScheduledActivity> all, List<BlockedDayRule> blockedDays,
                                        List<SpecialBlockRule> specialBlocks,
-                                       List<ProfessorUnavailability> profUnavail,
-                                       List<ProfessorRoomRestriction> profRooms) {
+                                       List<ProfessorUnavailability> profUnavail) {
         List<String> v = new ArrayList<>();
         int students = a.totalStudentCount();
 
-        if (students > room.getCapacity()) {
-            v.add("capacitate depășită cu " + (students - room.getCapacity()) + " locuri");
-        }
-        if (a.isRequiresAmphitheater() && room.getTypology() != RoomTypology.AMPHITHEATER) {
-            v.add("necesită amfiteatru");
-        }
-        if (room.getUnavailabilities().stream()
-                .anyMatch(u -> u.overlaps(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime()))) {
-            v.add("sala indisponibilă");
+        // room == null is an online activity: none of the room rules apply to it
+        if (room != null) {
+            if (students > room.getCapacity()) {
+                v.add("capacitate depășită cu " + (students - room.getCapacity()) + " locuri");
+            }
+            if (a.isRequiresAmphitheater() && room.getTypology() != RoomTypology.AMPHITHEATER) {
+                v.add("necesită amfiteatru");
+            }
+            if (a.isRequiresLab() && room.getTypology() != RoomTypology.LAB) {
+                v.add("necesită laborator");
+            }
+            if (room.getUnavailabilities().stream()
+                    .anyMatch(u -> u.overlaps(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime()))) {
+                v.add("sala indisponibilă");
+            }
         }
         if (a.isMaster() && !ts.isEveningModule()) {
             v.add("master doar în modulele de seară");
@@ -355,13 +385,11 @@ public class GenerationAdvisor {
                 break;
             }
         }
-        if (a.getSpecialCategory() == SpecialCategory.NORMAL) {
-            for (SpecialBlockRule r : specialBlocks) {
-                if (r.getTimeSlot() != null && r.getTimeSlot().getId().equals(ts.getId())
-                        && audienceMatches(a, r)) {
-                    v.add("interval rezervat pentru " + r.getCategory());
-                    break;
-                }
+        for (SpecialBlockRule r : specialBlocks) {
+            if (r.getTimeSlot() != null && r.getTimeSlot().getId().equals(ts.getId())
+                    && a.getSpecialCategory() != r.getCategory() && audienceMatches(a, r)) {
+                v.add("interval rezervat pentru " + r.getCategory());
+                break;
             }
         }
         if (a.getProfessor() != null) {
@@ -372,37 +400,16 @@ public class GenerationAdvisor {
                     break;
                 }
             }
-            boolean hasOnlyThis = false;
-            boolean matchesOnlyThis = false;
-            for (ProfessorRoomRestriction r : profRooms) {
-                if (!r.getProfessor().getId().equals(a.getProfessor().getId())) {
-                    continue;
-                }
-                if (r.getRestrictionType() == RestrictionType.FORBIDDEN
-                        && r.getRoom().getId().equals(room.getId())) {
-                    v.add("sală interzisă pentru acest cadru didactic");
-                }
-                if (r.getRestrictionType() == RestrictionType.ONLY_THIS) {
-                    hasOnlyThis = true;
-                    if (r.getRoom().getId().equals(room.getId())) {
-                        matchesOnlyThis = true;
-                    }
-                }
-            }
-            if (hasOnlyThis && !matchesOnlyThis) {
-                v.add("cadrul didactic poate preda doar în altă sală");
-            }
         }
-
         // clashes with activities already occupying this slot
         for (ScheduledActivity o : all) {
-            if (o.getId().equals(a.getId()) || o.getTimeSlot() == null || o.getRoom() == null) {
+            if (o.getId().equals(a.getId()) || !o.isPlaced()) {
                 continue;
             }
             if (!o.getTimeSlot().getId().equals(ts.getId()) || !a.parityClashesWith(o)) {
                 continue;
             }
-            if (o.getRoom().getId().equals(room.getId())) {
+            if (room != null && o.getRoom() != null && o.getRoom().getId().equals(room.getId())) {
                 v.add("sala e ocupată de „" + o.getSubject().getName() + "”");
             }
             if (a.getProfessor() != null && o.getProfessor() != null

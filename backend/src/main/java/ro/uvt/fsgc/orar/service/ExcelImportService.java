@@ -31,7 +31,6 @@ import ro.uvt.fsgc.orar.dto.ImportResult;
 import ro.uvt.fsgc.orar.repository.BlockedDayRuleRepository;
 import ro.uvt.fsgc.orar.repository.BuildingRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorRepository;
-import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorUnavailabilityRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
 import ro.uvt.fsgc.orar.repository.ScheduledActivityRepository;
@@ -61,7 +60,6 @@ public class ExcelImportService {
     private final BuildingRepository buildingRepo;
     private final SpecialBlockRuleRepository specialBlockRepo;
     private final ProfessorUnavailabilityRepository profUnavailRepo;
-    private final ProfessorRoomRestrictionRepository profRoomRepo;
     private final BlockedDayRuleRepository blockedDayRepo;
     private final TimeSlotRepository timeSlotRepo;
 
@@ -70,7 +68,6 @@ public class ExcelImportService {
                               ScheduledActivityRepository activityRepo, BuildingRepository buildingRepo,
                               SpecialBlockRuleRepository specialBlockRepo,
                               ProfessorUnavailabilityRepository profUnavailRepo,
-                              ProfessorRoomRestrictionRepository profRoomRepo,
                               BlockedDayRuleRepository blockedDayRepo,
                               TimeSlotRepository timeSlotRepo) {
         this.groupRepo = groupRepo;
@@ -81,7 +78,6 @@ public class ExcelImportService {
         this.buildingRepo = buildingRepo;
         this.specialBlockRepo = specialBlockRepo;
         this.profUnavailRepo = profUnavailRepo;
-        this.profRoomRepo = profRoomRepo;
         this.blockedDayRepo = blockedDayRepo;
         this.timeSlotRepo = timeSlotRepo;
     }
@@ -150,7 +146,6 @@ public class ExcelImportService {
         activityRepo.deleteAllInBatch();
         specialBlockRepo.deleteAllInBatch();
         profUnavailRepo.deleteAllInBatch();
-        profRoomRepo.deleteAllInBatch();
         blockedDayRepo.deleteAllInBatch();
         // Rooms are deliberately NOT deleted. They are matched by name and updated in
         // parseRooms instead, because deleting a room takes its unavailability windows with it
@@ -203,8 +198,29 @@ public class ExcelImportService {
                 count = nrAn;
             }
             if (byName.containsKey(name)) {
-                result.addWarning(SHEET_SECTIONS, excelRow, "Duplicate group name '" + name + "', row skipped");
-                continue;
+                StudentGroup other = byName.get(name);
+                // A cod_grupa that belongs to another YEAR of the same section is a typo, not a
+                // real duplicate ("CRP I_gr.2" on a CRP year 2 row means "CRP II_gr.2"). Dropping
+                // the row would leave that year one group short and double its seminars up on the
+                // group that remains, so the group is renamed after its siblings instead. Nothing
+                // refers to a group by this code — set_studenti names the year — so it is safe.
+                String repaired = sameSectionOtherYear(other, spec, year)
+                        ? repairedGroupName(name, bySpecYear.get(specYearKey), spec, year,
+                                specYearCount, specYearKey)
+                        : null;
+                if (repaired == null || byName.containsKey(repaired)) {
+                    result.addWarning(SHEET_SECTIONS, excelRow, "Group '" + name + "' is already used by "
+                            + other.getSpecialization() + " year " + other.getYear() + ", so this row ("
+                            + spec + " year " + year + ") was SKIPPED and that year is left with one"
+                            + " group fewer — its seminars will double up on another group. Give each"
+                            + " group its own cod_grupa.");
+                    continue;
+                }
+                result.addWarning(SHEET_SECTIONS, excelRow, "cod_grupa '" + name + "' belongs to "
+                        + other.getSpecialization() + " year " + other.getYear() + ", but this row is "
+                        + spec + " year " + year + " — read as a typo and imported as '" + repaired
+                        + "'. Fix the cell if that is not the group you meant.");
+                name = repaired;
             }
             StudentGroup g = new StudentGroup();
             g.setName(name);
@@ -349,9 +365,16 @@ public class ExcelImportService {
     private void parseSubjects(Sheet sheet, ImportResult result, Map<String, Professor> professorByName,
                                Map<String, StudentGroup> groupByName,
                                Map<String, List<StudentGroup>> groupBySpecYear) {
+        // First pass: decide, per row, which single group it is really about and which discipline
+        // it belongs to. The sheet expresses that in two contradictory ways (see RowPlan), and both
+        // answers need the whole sheet in view, so they cannot be made row by row below.
+        Map<Integer, RowPlan> plans = planRows(sheet, result, groupByName, groupBySpecYear);
+
         Map<String, Subject> subjectByCode = new HashMap<>();
+        Map<String, Subject> subjectByDiscipline = new HashMap<>();
         int subjects = 0;
         int activities = 0;
+        int mergedByName = 0;
         for (int r = 1; r <= sheet.getLastRowNum(); r++) {
             Row row = sheet.getRow(r);
             if (ExcelCells.isBlank(row)) {
@@ -395,18 +418,31 @@ public class ExcelImportService {
             List<GroupRef> groupRefs = resolveGroupRefs(setStudenti, groupByName, groupBySpecYear,
                     result, excelRow);
 
-            Subject subject = subjectByCode.get(codMaterie);
+            RowPlan plan = plans.get(excelRow);
+            // "Genuri ... Grupa 1" is not a discipline of its own: it is the seminar of "Genuri ..."
+            // held for group 1. Such a row joins the parent discipline instead of creating a twin.
+            String disciplineName = plan == null ? materie : plan.disciplineName();
+            String disciplineKey = plan == null ? null : plan.disciplineKey();
+
+            Subject subject = disciplineKey == null ? null : subjectByDiscipline.get(disciplineKey);
+            if (subject != null && !subject.getCode().equals(codMaterie)) {
+                mergedByName++;
+            }
+            if (subject == null) {
+                subject = subjectByCode.get(codMaterie);
+            }
             if (subject == null) {
                 subject = new Subject();
                 subject.setCode(codMaterie);
-                subject.setName(materie);
+                subject.setName(disciplineName);
                 subject.setDepartment(dept);
                 subjectRepo.save(subject);
                 subjectByCode.put(codMaterie, subject);
                 subjects++;
             }
-
-            warnIfGroupNamedTwice(materie, groupRefs, result, excelRow);
+            if (disciplineKey != null) {
+                subjectByDiscipline.putIfAbsent(disciplineKey, subject);
+            }
 
             // Halves of one alternating hour share a key so the solver keeps them together.
             boolean paired = specs.size() > 1 && splitsAudienceByParity(specs, groupRefs);
@@ -422,7 +458,10 @@ public class ExcelImportService {
             for (int i = 0; i < specs.size(); i++) {
                 ActivityTypeParser.ActivitySpec spec = specs.get(i);
                 Set<StudentGroup> audience = audienceFor(spec, i, specs, groupRefs, paired);
-                List<Set<StudentGroup>> perGroup = splitPerGroup(spec.type(), audience);
+                // The row is about one group only: take it, and do not split the year all over again.
+                List<Set<StudentGroup>> perGroup = plan != null && plan.onlyGroup() != null
+                        ? List.of(new LinkedHashSet<>(List.of(plan.onlyGroup())))
+                        : splitPerGroup(spec.type(), audience);
                 if (perGroup.size() > 1) {
                     result.addWarning(SHEET_SUBJECTS, excelRow,
                             "'" + activitate + "' is taught per group: created " + perGroup.size()
@@ -446,11 +485,208 @@ public class ExcelImportService {
                 }
             }
         }
+        if (mergedByName > 0) {
+            result.addWarning(SHEET_SUBJECTS, 1, mergedByName + " row(s) named a group in the"
+                    + " subject name (\"... Grupa N\"): each was attached to that one group and"
+                    + " folded into its parent discipline, instead of becoming a discipline of its"
+                    + " own repeated for every group.");
+        }
         result.setSubjects(subjects);
         result.setActivities(activities);
     }
 
+    // ------------------------------------------------ which group, and which discipline, per row
+
+    /**
+     * What one Discipline row really means, once the whole sheet is in view.
+     *
+     * <p>The sheet says "one activity per group" in two different ways, and both need more than the
+     * row itself to read. Either the group is written into the subject name ("... Grupa 2") while
+     * set_studenti still names the whole year — then the name wins and the row is that one group's
+     * seminar, belonging to the discipline without the suffix. Or nothing marks the group and the
+     * discipline simply has as many seminar rows as the year has groups — then they are matched in
+     * order, first row to first group.
+     *
+     * @param disciplineName the subject name without any "Grupa N" suffix
+     * @param disciplineKey  identifies the discipline across its rows (name + audience)
+     * @param onlyGroup      the single group this row is for, or null to keep the default split
+     */
+    record RowPlan(String disciplineName, String disciplineKey, StudentGroup onlyGroup) {
+    }
+
+    private Map<Integer, RowPlan> planRows(Sheet sheet, ImportResult result,
+                                           Map<String, StudentGroup> groupByName,
+                                           Map<String, List<StudentGroup>> groupBySpecYear) {
+        // Group resolution warnings belong to the real pass, not to this dry run.
+        ImportResult silent = new ImportResult();
+        Map<Integer, RowPlan> plans = new HashMap<>();
+        // rows of one discipline that are taught per group and name no group: key -> Excel rows
+        Map<String, List<Integer>> unmarkedRows = new java.util.LinkedHashMap<>();
+        Map<String, List<StudentGroup>> audienceOfKey = new HashMap<>();
+        Map<String, Set<StudentGroup>> takenOfKey = new HashMap<>();
+        Map<String, String> nameOfKey = new HashMap<>();
+
+        for (int r = 1; r <= sheet.getLastRowNum(); r++) {
+            Row row = sheet.getRow(r);
+            if (ExcelCells.isBlank(row)) {
+                continue;
+            }
+            int excelRow = r + 1;
+            String setStudenti = ExcelCells.str(row, 0);
+            String materie = ExcelCells.str(row, 1);
+            String codMaterie = ExcelCells.str(row, 2);
+            String activitate = ExcelCells.str(row, 4);
+            if (materie == null || codMaterie == null) {
+                continue;
+            }
+            List<ActivityTypeParser.ActivitySpec> specs = ActivityTypeParser.parse(activitate);
+            if (specs.isEmpty()) {
+                continue;
+            }
+            List<StudentGroup> groups = resolveGroupRefs(setStudenti, groupByName, groupBySpecYear,
+                    silent, excelRow).stream().map(GroupRef::group).toList();
+            String base = stripGroupSuffix(materie);
+            String key = disciplineKey(base, groups);
+            nameOfKey.putIfAbsent(key, base);
+
+            Integer named = groupNumberInName(materie);
+            if (named != null) {
+                StudentGroup hit = groupNumbered(groups, named);
+                if (hit == null) {
+                    result.addWarning(SHEET_SUBJECTS, excelRow, "Subject '" + materie + "' names"
+                            + " group " + named + ", but set_studenti '" + setStudenti + "' has no"
+                            + " such group (" + describeNames(groups) + ") — the row falls back on"
+                            + " the groups it does have, doubling up on one of them. Usually that"
+                            + " group is missing or misnamed in the Sectii sheet.");
+                } else {
+                    takenOfKey.computeIfAbsent(key, k -> new LinkedHashSet<>()).add(hit);
+                }
+                plans.put(excelRow, new RowPlan(base, key, hit));
+                continue;
+            }
+            plans.put(excelRow, new RowPlan(base, key, null));
+            // a course is attended by everyone: only per-group rows can be matched in order
+            if (specs.size() == 1 && specs.get(0).type() != ActivityType.COURSE && groups.size() > 1) {
+                unmarkedRows.computeIfAbsent(key, k -> new ArrayList<>()).add(excelRow);
+                audienceOfKey.put(key, groups);
+            }
+        }
+
+        // As many unnamed rows as there are groups still free: match them in sheet order. Rows
+        // whose name already claimed a group are out of the running, and so are their groups.
+        for (Map.Entry<String, List<Integer>> e : unmarkedRows.entrySet()) {
+            List<Integer> rows = e.getValue();
+            List<StudentGroup> groups = audienceOfKey.get(e.getKey());
+            if (groups == null) {
+                continue;
+            }
+            Set<StudentGroup> taken = takenOfKey.getOrDefault(e.getKey(), Set.of());
+            List<StudentGroup> free = groups.stream().filter(g -> !taken.contains(g)).toList();
+            if (rows.size() != free.size()) {
+                continue; // cannot tell which row is which group: leave the default split
+            }
+            if (rows.size() == 1 && taken.isEmpty()) {
+                continue; // one row for one group: nothing to decide
+            }
+            StringBuilder how = new StringBuilder();
+            for (int i = 0; i < rows.size(); i++) {
+                RowPlan old = plans.get(rows.get(i));
+                plans.put(rows.get(i), new RowPlan(old.disciplineName(), old.disciplineKey(),
+                        free.get(i)));
+                how.append(i == 0 ? "" : ", ").append("row ").append(rows.get(i)).append(" -> ")
+                        .append(free.get(i).getName());
+            }
+            result.addWarning(SHEET_SUBJECTS, rows.get(0), "'" + nameOfKey.get(e.getKey()) + "': "
+                    + rows.size() + " row(s) taught per group name no group, and " + free.size()
+                    + " of " + groups.size() + " group(s) are still free — matched in sheet order ("
+                    + how + "). Check the order is right, or name the group in set_studenti.");
+        }
+        return plans;
+    }
+
+    /** "MD II_gr.1, MD II_gr.2" — the groups an audience actually resolved to. */
+    private static String describeNames(List<StudentGroup> groups) {
+        return groups.isEmpty() ? "none"
+                : String.join(", ", groups.stream().map(StudentGroup::getName).toList());
+    }
+
+    /** Identifies a discipline across its rows: base name + the year(s) it is taught to. */
+    private static String disciplineKey(String baseName, List<StudentGroup> groups) {
+        List<String> years = groups.stream()
+                .map(g -> g.getSpecialization() + g.getYear())
+                .distinct().sorted().toList();
+        return normalizeName(baseName) + "|" + String.join("+", years);
+    }
+
+    /** "Genuri ... Grupa 2" -> 2; null when the name does not end in a group number. */
+    static Integer groupNumberInName(String subjectName) {
+        if (subjectName == null) {
+            return null;
+        }
+        var m = GROUP_SUFFIX.matcher(subjectName.trim());
+        return m.find() ? Integer.valueOf(m.group(1)) : null;
+    }
+
+    /** "Genuri ... Grupa 2" -> "Genuri ...". */
+    static String stripGroupSuffix(String subjectName) {
+        if (subjectName == null) {
+            return null;
+        }
+        return GROUP_SUFFIX.matcher(subjectName.trim()).replaceAll("").trim();
+    }
+
+    /** The one group of the audience whose name ends in that number ("MD II_gr.2" -> 2). */
+    static StudentGroup groupNumbered(List<StudentGroup> groups, int number) {
+        StudentGroup found = null;
+        for (StudentGroup g : groups) {
+            var m = TRAILING_NUMBER.matcher(g.getName() == null ? "" : g.getName().trim());
+            if (m.find() && Integer.parseInt(m.group(1)) == number) {
+                if (found != null) {
+                    return null; // ambiguous: two groups claim the same number
+                }
+                found = g;
+            }
+        }
+        return found;
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    /** "... Grupa 2", "... gr.2", "... - Grupa 2" at the end of a subject name. */
+    private static final java.util.regex.Pattern GROUP_SUFFIX = java.util.regex.Pattern.compile(
+            "\\s*[-–]?\\s*\\bgr(?:upa)?\\.?\\s*(\\d+)\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /** The number a group name ends with ("MD II_gr.2", "RISE1 - Grupa 2" -> 2). */
+    private static final java.util.regex.Pattern TRAILING_NUMBER =
+            java.util.regex.Pattern.compile("(\\d+)\\s*$");
+
+    /** True when a taken group name comes from another year of the same section. */
+    private static boolean sameSectionOtherYear(StudentGroup taken, String spec, int year) {
+        return taken.getSpecialization() != null && spec != null
+                && taken.getSpecialization().trim().equalsIgnoreCase(spec.trim())
+                && taken.getYear() != year;
+    }
+
+    /**
+     * The name a mistyped cod_grupa should have had. Siblings of the same section-year show the
+     * house style ("CRP II_gr.1" -> "CRP II_gr.2"); with no sibling yet, the group is the year's
+     * first and takes the same name an empty cod_grupa would have produced.
+     */
+    static String repairedGroupName(String typo, List<StudentGroup> siblings, String spec,
+                                            int year, Map<String, Integer> specYearCount,
+                                            String specYearKey) {
+        var m = TRAILING_NUMBER.matcher(typo.trim());
+        if (siblings != null && !siblings.isEmpty() && m.find()) {
+            String pattern = siblings.get(0).getName();
+            var sm = TRAILING_NUMBER.matcher(pattern.trim());
+            if (sm.find()) {
+                return pattern.substring(0, sm.start(1)) + m.group(1) + pattern.substring(sm.end(1));
+            }
+            return null;
+        }
+        int n = specYearCount.merge(specYearKey, 1, Integer::sum);
+        return (n == 1) ? (spec + year) : (spec + year + " - Grupa " + n);
+    }
 
     /** A resolved group plus the explicit (SI)/(SP) marker its token carried, if any. */
     record GroupRef(StudentGroup group, WeekParity parity) {
@@ -589,35 +825,6 @@ public class ExcelImportService {
 
     private static String shortParity(WeekParity p) {
         return p == WeekParity.ODD_WEEKS ? "SI" : p == WeekParity.EVEN_WEEKS ? "SP" : "toate";
-    }
-
-    /**
-     * Catches a row that splits by group twice over: the subject is named "... Grupa 1", so the
-     * sheet has already made one row per group, but set_studenti still names the whole year. The
-     * seminar is then held once per group for EACH of those rows, which is twice too many hours.
-     * Warned about rather than guessed at, because the fix is a decision about the source data.
-     */
-    static void warnIfGroupNamedTwice(String subjectName, List<GroupRef> refs,
-                                      ImportResult result, int excelRow) {
-        if (subjectName == null || refs.size() < 2) {
-            return;
-        }
-        var m = java.util.regex.Pattern.compile("\\bgr(?:upa)?\\.?\\s*(\\d+)\\s*$",
-                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(subjectName.trim());
-        if (!m.find()) {
-            return;
-        }
-        String wanted = "GRUPA" + m.group(1);
-        boolean audienceNamesIt = refs.stream().anyMatch(r ->
-                r.group().getName() != null
-                        && r.group().getName().toUpperCase().replaceAll("\\s+", "").endsWith(wanted));
-        if (audienceNamesIt) {
-            result.addWarning(SHEET_SUBJECTS, excelRow,
-                    "Subject '" + subjectName + "' already names a group, but set_studenti lists "
-                            + refs.size() + " groups, so this row becomes " + refs.size()
-                            + " seminars instead of 1. Name only that group in set_studenti, or"
-                            + " drop the group from the subject name.");
-        }
     }
 
     /** Same room to a human: ignoring case, surrounding spaces and leading zeros ("028" = "28"). */

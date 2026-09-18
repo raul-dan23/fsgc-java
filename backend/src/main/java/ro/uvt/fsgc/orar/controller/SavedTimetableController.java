@@ -100,7 +100,7 @@ public class SavedTimetableController {
         snapshot.setCreatedAt(LocalDateTime.now().withNano(0));
         snapshot.setTotalActivities(activities.size());
         snapshot.setAssignedCount((int) activities.stream()
-                .filter(a -> a.getTimeSlot() != null && a.getRoom() != null).count());
+                .filter(ScheduledActivity::isPlaced).count());
 
         for (ScheduledActivity a : activities) {
             snapshot.getEntries().add(new SavedTimetableEntry(snapshot, a.getId(),

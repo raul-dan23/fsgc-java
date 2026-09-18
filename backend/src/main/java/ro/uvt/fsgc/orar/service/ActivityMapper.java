@@ -37,7 +37,7 @@ public final class ActivityMapper {
                     return x.specialization().compareToIgnoreCase(y.specialization());
                 })
                 .collect(Collectors.toList());
-        boolean assigned = ts != null && room != null;
+        boolean assigned = a.isPlaced();
         return new ActivityView(
                 a.getId(),
                 a.getSubject().getCode(),
@@ -47,6 +47,7 @@ public final class ActivityMapper {
                 a.getRawType(),
                 a.getWeekParity().name(),
                 a.getSpecialCategory().name(),
+                a.isOnline(),
                 groups,
                 sections,
                 a.totalStudentCount(),

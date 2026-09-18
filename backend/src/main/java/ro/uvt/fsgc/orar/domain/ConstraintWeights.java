@@ -62,4 +62,15 @@ public class ConstraintWeights {
      */
     @Column(name = "room_oversize", nullable = false)
     private int roomOversize = 2;
+
+    /**
+     * Penalty for sending a group from P01 into another room (or back) in the very next module.
+     * P01 is a 20-minute walk from the rest, and the break between modules is 10 minutes.
+     */
+    @Column(name = "far_room_commute", nullable = false)
+    private int farRoomCommute = 80;
+
+    /** Penalty per teaching day beyond the third in a professor's week. */
+    @Column(name = "professor_week_days", nullable = false)
+    private int professorWeekDays = 60;
 }

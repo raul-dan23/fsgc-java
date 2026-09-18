@@ -300,7 +300,8 @@ public class AdminController {
     public record AdminActivity(Long id, Long subjectId, String subjectCode, String subjectName,
                                 Long professorId, String professorName, String activityType,
                                 String weekParity, String specialCategory, boolean requiresAmphitheater,
-                                String rawType, int durationInSlots, List<Long> groupIds,
+                                boolean requiresLab, boolean online, String rawType,
+                                int durationInSlots, List<Long> groupIds,
                                 List<String> groupNames, int students, String room, String day,
                                 Integer slotIndex, String parityPairKey) {
     }
@@ -334,6 +335,8 @@ public class AdminController {
                 a.getWeekParity().name(),
                 a.getSpecialCategory().name(),
                 a.isRequiresAmphitheater(),
+                a.isRequiresLab(),
+                a.isOnline(),
                 a.getRawType(),
                 a.getDurationInSlots(),
                 groupIds, groupNames, a.totalStudentCount(),
@@ -344,8 +347,9 @@ public class AdminController {
     }
 
     public record ActivityReq(Long subjectId, Long professorId, String activityType, String weekParity,
-                              String specialCategory, Boolean requiresAmphitheater, String rawType,
-                              Integer durationInSlots, List<Long> groupIds, String parityPairKey) {
+                              String specialCategory, Boolean requiresAmphitheater, Boolean requiresLab,
+                              Boolean online, String rawType, Integer durationInSlots,
+                              List<Long> groupIds, String parityPairKey) {
     }
 
     @PostMapping("/activities")
@@ -373,6 +377,12 @@ public class AdminController {
         a.setWeekParity(enumOr(WeekParity.class, req.weekParity(), WeekParity.EVERY_WEEK));
         a.setSpecialCategory(enumOr(SpecialCategory.class, req.specialCategory(), SpecialCategory.NORMAL));
         a.setRequiresAmphitheater(Boolean.TRUE.equals(req.requiresAmphitheater()));
+        a.setRequiresLab(Boolean.TRUE.equals(req.requiresLab()));
+        a.setOnline(Boolean.TRUE.equals(req.online()));
+        if (a.isOnline()) {
+            // the hour is held nowhere, so it must give back whatever room it held until now
+            a.setRoom(null);
+        }
         a.setRawType(trimmed(req.rawType()));
         // Carried through so editing one half of an alternating hour does not unpair it.
         a.setParityPairKey(trimmed(req.parityPairKey()));

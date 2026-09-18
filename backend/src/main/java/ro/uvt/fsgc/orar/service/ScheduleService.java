@@ -7,10 +7,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ro.uvt.fsgc.orar.domain.Room;
 import ro.uvt.fsgc.orar.domain.ScheduledActivity;
+import ro.uvt.fsgc.orar.domain.SpecialBlockRule;
 import ro.uvt.fsgc.orar.domain.TimeSlot;
 import ro.uvt.fsgc.orar.dto.ActivityView;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
 import ro.uvt.fsgc.orar.repository.ScheduledActivityRepository;
+import ro.uvt.fsgc.orar.repository.SpecialBlockRuleRepository;
 import ro.uvt.fsgc.orar.repository.TimeSlotRepository;
 
 /**
@@ -24,12 +26,14 @@ public class ScheduleService {
     private final ScheduledActivityRepository activityRepo;
     private final TimeSlotRepository timeSlotRepo;
     private final RoomRepository roomRepo;
+    private final SpecialBlockRuleRepository specialBlockRepo;
 
     public ScheduleService(ScheduledActivityRepository activityRepo, TimeSlotRepository timeSlotRepo,
-                           RoomRepository roomRepo) {
+                           RoomRepository roomRepo, SpecialBlockRuleRepository specialBlockRepo) {
         this.activityRepo = activityRepo;
         this.roomRepo = roomRepo;
         this.timeSlotRepo = timeSlotRepo;
+        this.specialBlockRepo = specialBlockRepo;
     }
 
     @Transactional(readOnly = true)
@@ -53,7 +57,8 @@ public class ScheduleService {
                 new IllegalArgumentException("Room not found: " + roomId));
 
         activity.setTimeSlot(ts);
-        activity.setRoom(room);
+        // an online hour never takes a room, whatever the grid sent along with the drop
+        activity.setRoom(activity.isOnline() ? null : room);
         activityRepo.save(activity);
 
         return new MoveResult(ActivityMapper.toView(activity), validate(activity));
@@ -65,27 +70,44 @@ public class ScheduleService {
         List<String> violations = new ArrayList<>();
         TimeSlot ts = activity.getTimeSlot();
         Room room = activity.getRoom();
-        if (ts == null || room == null) {
+        if (!activity.isPlaced()) {
             return violations; // unplaced: nothing to check
         }
 
-        if (activity.totalStudentCount() > room.getCapacity()) {
-            violations.add("Room capacity exceeded (" + activity.totalStudentCount()
-                    + " > " + room.getCapacity() + ")");
+        // Room rules only exist when there is a room: an online hour is held nowhere.
+        if (room != null) {
+            if (activity.totalStudentCount() > room.getCapacity()) {
+                violations.add("Room capacity exceeded (" + activity.totalStudentCount()
+                        + " > " + room.getCapacity() + ")");
+            }
+            // Same rule the solver uses: rooms are free unless an unavailability window overlaps.
+            room.getUnavailabilities().stream()
+                    .filter(un -> un.overlaps(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime()))
+                    .findFirst()
+                    .ifPresent(un -> violations.add("Sala este indisponibilă în acest interval ("
+                            + un.getStartTime() + "–" + un.getEndTime()
+                            + (un.getReason() == null ? "" : ", " + un.getReason()) + ")"));
         }
-        // Same rule the solver uses: rooms are free unless an unavailability window overlaps.
-        room.getUnavailabilities().stream()
-                .filter(un -> un.overlaps(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime()))
-                .findFirst()
-                .ifPresent(un -> violations.add("Sala este indisponibilă în acest interval ("
-                        + un.getStartTime() + "–" + un.getEndTime()
-                        + (un.getReason() == null ? "" : ", " + un.getReason()) + ")"));
         if (activity.isMaster() && !ts.isEveningModule()) {
             violations.add("Master activity outside evening modules (6-8)");
         }
-        if (activity.isRequiresAmphitheater()
+        // A reserved interval takes nothing but its own category — same rule the solver enforces.
+        for (SpecialBlockRule rule : specialBlockRepo.findAll()) {
+            if (rule.getTimeSlot() != null && rule.getTimeSlot().getId().equals(ts.getId())
+                    && activity.getSpecialCategory() != rule.getCategory()
+                    && blockAudienceMatches(activity, rule)) {
+                violations.add("Interval blocat pentru " + rule.getCategory()
+                        + " — aici nu se poate programa nimic");
+                break;
+            }
+        }
+        if (activity.isRequiresAmphitheater() && room != null
                 && room.getTypology() != ro.uvt.fsgc.orar.domain.RoomTypology.AMPHITHEATER) {
             violations.add("Amphitheater required");
+        }
+        if (activity.isRequiresLab() && room != null
+                && room.getTypology() != ro.uvt.fsgc.orar.domain.RoomTypology.LAB) {
+            violations.add("Activitatea trebuie ținută într-un laborator");
         }
 
         for (ScheduledActivity other : activityRepo.findAll()) {
@@ -98,7 +120,8 @@ public class ScheduleService {
             if (activity.getProfessor() != null && activity.getProfessor().equals(other.getProfessor())) {
                 violations.add("Professor clash with " + other.getSubject().getCode());
             }
-            if (other.getRoom() != null && other.getRoom().getId().equals(room.getId())) {
+            if (room != null && other.getRoom() != null
+                    && other.getRoom().getId().equals(room.getId())) {
                 violations.add("Room clash with " + other.getSubject().getCode());
             }
             if (!Collections.disjoint(activity.getStudentGroups(), other.getStudentGroups())) {
@@ -106,5 +129,18 @@ public class ScheduleService {
             }
         }
         return violations;
+    }
+
+    /** Same audience test the solver uses: an explicit group, or a specialization + year. */
+    private static boolean blockAudienceMatches(ScheduledActivity a, SpecialBlockRule rule) {
+        if (rule.getStudentGroup() != null) {
+            return a.getStudentGroups().contains(rule.getStudentGroup());
+        }
+        if (rule.getSpecialization() != null && rule.getYear() != null) {
+            return a.getStudentGroups().stream().anyMatch(g ->
+                    rule.getSpecialization().equalsIgnoreCase(g.getSpecialization())
+                            && rule.getYear() == g.getYear());
+        }
+        return false;
     }
 }

@@ -12,6 +12,7 @@ public record ActivityView(
         String rawType,
         String weekParity,
         String specialCategory,
+        boolean online,
         List<String> groups,
         List<SectionView> sections,
         int students,

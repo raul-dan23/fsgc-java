@@ -67,13 +67,35 @@ class ExcelExportServiceTest {
             assertThat(cell(s, 2, 0)).isEqualTo("LUNI");
             assertThat(cell(s, 4, 1)).isEqualTo("9:40-11:10");
             assertThat(cell(s, 5, 1)).isEqualTo("Sala");
-            // activity text on the module row, room on the row below, for the AP column
-            assertThat(cell(s, 4, 2)).isEqualTo("Sisteme administrative, Draganescu, c");
+            // activity text on the module row, room on the row below, for the AP column.
+            // The group is the one of THAT column: AP's own group, not SP's.
+            assertThat(cell(s, 4, 2)).isEqualTo("Sisteme administrative, Draganescu, c, gr. 1");
             assertThat(cell(s, 5, 2)).isEqualTo("Paris 01");
             // the common course is one merged cell spanning AP (col 2) and SP (col 3)
             boolean mergedAcrossSpecs = s.getMergedRegions().stream().anyMatch(r ->
                     r.getFirstRow() == 4 && r.getFirstColumn() == 2 && r.getLastColumn() == 3);
             assertThat(mergedAcrossSpecs).as("common course merged across specializations").isTrue();
+        }
+    }
+
+    @Test
+    void anAlternatingHourSaysWhichWeekItIsHeld() throws Exception {
+        List<TimeSlot> slots = buildWeek();
+        TimeSlot mon2 = slots.stream()
+                .filter(t -> t.getDayOfWeek() == DayOfWeek.MONDAY && t.getSlotIndex() == 2)
+                .findFirst().orElseThrow();
+        StudentGroup ap2 = group("AP1-GR2", "AP", 1, StudyProgram.LICENSE);
+
+        ScheduledActivity odd = activity(11L, "Statistica", "AP102", "Ionescu",
+                ActivityType.SEMINAR, mon2, "028", Set.of(ap2));
+        odd.setWeekParity(ro.uvt.fsgc.orar.domain.WeekParity.ODD_WEEKS);
+
+        when(activityRepo.findAll()).thenReturn(List.of(odd));
+        when(timeSlotRepo.findAllByOrderByDayOfWeekAscSlotIndexAsc()).thenReturn(slots);
+
+        try (Workbook wb = new XSSFWorkbook(new ByteArrayInputStream(service.export()))) {
+            assertThat(cell(wb.getSheet("Orar"), 4, 2))
+                    .isEqualTo("Statistica, Ionescu, s, gr. 2, SI");
         }
     }
 

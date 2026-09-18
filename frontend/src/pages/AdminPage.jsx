@@ -58,6 +58,16 @@ export default function AdminPage() {
           Modificările se aplică direct în baza de date. După ce schimbi date care afectează orarul
           (grupe, activități, săli), regenerează orarul din <b>Generare</b>.
         </p>
+        {tab === 'activities' && (
+          <p className="muted" style={{ marginBottom: 0, marginTop: 8 }}>
+            Bifele <b>Laborator</b> și <b>Online</b> se aplică dintr-un click, fără să intri în
+            editare. <b>Laborator</b> înseamnă că ora se poate ține <i>numai</i> într-o sală de tip
+            laborator; nebifată, ora poate merge oriunde, inclusiv într-un laborator liber.
+            <b>Online</b> înseamnă că ora primește interval și respectă mai departe restricțiile de
+            cadre didactice, grupe și intervale blocate, dar nu ocupă nicio sală — deci poate sta în
+            același modul cu ore ale altor grupe.
+          </p>
+        )}
         {tab === 'rooms' && (
           <p className="muted" style={{ marginBottom: 0, marginTop: 8 }}>
             O sală nouă e liberă în toate cele 40 de intervale — nu trebuie să declari când e
@@ -184,12 +194,14 @@ function buildTabs({ subjects, professors, groups }) {
       blank: {
         subjectId: subjects[0] ? subjects[0].id : null, professorId: null, activityType: 'SEMINAR',
         weekParity: 'EVERY_WEEK', specialCategory: 'NORMAL', requiresAmphitheater: false,
-        rawType: 'Seminar', durationInSlots: 1, groupIds: [], parityPairKey: null,
+        requiresLab: false, online: false, rawType: 'Seminar', durationInSlots: 1,
+        groupIds: [], parityPairKey: null,
       },
       payload: (r) => ({
         subjectId: r.subjectId, professorId: r.professorId || null, activityType: r.activityType,
         weekParity: r.weekParity, specialCategory: r.specialCategory,
-        requiresAmphitheater: !!r.requiresAmphitheater, rawType: r.rawType,
+        requiresAmphitheater: !!r.requiresAmphitheater, requiresLab: !!r.requiresLab,
+        online: !!r.online, rawType: r.rawType,
         durationInSlots: num(r.durationInSlots), groupIds: r.groupIds || [],
         // Not editable here, but must round-trip or saving would unpair an SI/SP hour.
         parityPairKey: r.parityPairKey || null,
@@ -206,6 +218,9 @@ function buildTabs({ subjects, professors, groups }) {
         { key: 'weekParity', label: 'Săptămâni', type: 'select', options: PARITIES, width: 150 },
         { key: 'specialCategory', label: 'Categorie', type: 'select', options: CATEGORIES, width: 120 },
         { key: 'requiresAmphitheater', label: 'Amfi.', type: 'checkbox', width: 70 },
+        // one click, no edit mode: marking a semester's online or lab hours is otherwise a chore
+        { key: 'requiresLab', label: 'Laborator', type: 'checkbox', quickToggle: true, width: 90 },
+        { key: 'online', label: 'Online', type: 'checkbox', quickToggle: true, width: 80 },
         { key: 'rawType', label: 'Valoare Excel', type: 'text', width: 150 },
         { key: 'students', label: 'Stud.', readOnly: true, width: 70 },
       ],
@@ -275,6 +290,25 @@ function EntityTable({ tab, onChanged }) {
       setTimeout(() => setNotice(null), 2500);
     } catch (e) {
       setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * One-click edit for a boolean column: saves immediately instead of going through edit mode.
+   * The payload is the row itself with that one field flipped, so nothing else changes.
+   */
+  async function quickToggle(row, key, value) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.adminUpdate(tab.kind, row.id, tab.payload({ ...row, [key]: value }));
+      setRows((cur) => cur.map((r) => (r.id === row.id ? { ...r, [key]: value } : r)));
+      onChanged();
+    } catch (e) {
+      setError(e.message);
+      reload();
     } finally {
       setBusy(false);
     }
@@ -376,7 +410,15 @@ function EntityTable({ tab, onChanged }) {
                          onSave={save} onCancel={cancel} busy={busy} />
               ) : (
                 <tr key={row.id}>
-                  {tab.columns.map((c) => <td key={c.key}>{display(row, c)}</td>)}
+                  {tab.columns.map((c) => (
+                    <td key={c.key}>
+                      {c.quickToggle ? (
+                        <input type="checkbox" checked={!!row[c.key]} disabled={busy}
+                               title={`${c.label}: click pentru a schimba`}
+                               onChange={(e) => quickToggle(row, c.key, e.target.checked)} />
+                      ) : display(row, c)}
+                    </td>
+                  ))}
                   <td>
                     <button className="ghost" onClick={() => startEdit(row)} disabled={busy}>Editează</button>{' '}
                     <button className="danger" onClick={() => remove(row)} disabled={busy}>Șterge</button>
@@ -454,19 +496,30 @@ function Field({ col, draft, set }) {
   }
 
   if (col.type === 'groups') {
+    // Checkboxes, not a <select multiple>: picking the 1st and the 5th group there means
+    // Cmd-clicking exactly right, and one stray click wipes the whole selection.
     const selected = Array.isArray(v) ? v : [];
+    const toggle = (id) => set(col.key, selected.includes(id)
+      ? selected.filter((x) => x !== id)
+      : [...selected, id]);
     return (
-      <select
-        multiple
-        size={Math.min(6, Math.max(3, col.options.length))}
-        value={selected.map(String)}
-        onChange={(e) => set(col.key, Array.from(e.target.selectedOptions, (o) => Number(o.value)))}
-        style={{ width: '100%', minHeight: 90 }}
-      >
-        {col.options.map((g) => (
-          <option key={g.id} value={String(g.id)}>{g.name} ({g.studentCount})</option>
-        ))}
-      </select>
+      <div style={{ minWidth: 210 }}>
+        <div className="check-head">
+          <span>{selected.length} {selected.length === 1 ? 'grupă aleasă' : 'grupe alese'}</span>
+          {selected.length > 0 && (
+            <button type="button" className="ghost" onClick={() => set(col.key, [])}>golește</button>
+          )}
+        </div>
+        <div className="check-list">
+          {col.options.map((g) => (
+            <label key={g.id} className={selected.includes(g.id) ? 'on' : undefined}>
+              <input type="checkbox" checked={selected.includes(g.id)}
+                     onChange={() => toggle(g.id)} />
+              <span>{g.name} <em>({g.studentCount})</em></span>
+            </label>
+          ))}
+        </div>
+      </div>
     );
   }
 

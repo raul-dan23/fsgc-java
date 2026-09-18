@@ -80,6 +80,22 @@ public class ScheduledActivity {
     @Column(name = "requires_amphitheater", nullable = false)
     private boolean requiresAmphitheater = false;
 
+    /**
+     * Must be held in a room of typology LAB. An activity without this flag is free to go
+     * anywhere, a lab included — the flag narrows the choice, it does not reserve the labs.
+     */
+    @Column(name = "requires_lab", nullable = false)
+    private boolean requiresLab = false;
+
+    /**
+     * Held online: the activity still takes a time slot and still obeys every rule about people
+     * (professor clashes and unavailabilities, group clashes, blocked days and reserved intervals),
+     * but it never takes a room. Two online hours — or an online hour and an on-site one — may
+     * therefore share the same module, as long as no group and no professor is in both.
+     */
+    @Column(nullable = false)
+    private boolean online = false;
+
     /** Original Excel activitate value, kept for traceability and UI display. */
     @Column(name = "raw_type")
     private String rawType;
@@ -104,6 +120,15 @@ public class ScheduledActivity {
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "room_id")
     private Room room;
+
+    /**
+     * True when the activity has its place in the timetable: a slot, plus a room unless it is
+     * online. Everything that counts placements (exports, the unassigned list, the solver's
+     * medium score) asks this instead of testing the two planning variables by hand.
+     */
+    public boolean isPlaced() {
+        return timeSlot != null && (online || room != null);
+    }
 
     /** Sum of student counts across all attending groups (common-course aware). */
     public int totalStudentCount() {

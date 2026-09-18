@@ -67,8 +67,7 @@ public class ExcelExportService {
     @Transactional(readOnly = true)
     public byte[] export() {
         List<ScheduledActivity> all = activityRepo.findAll();
-        List<ScheduledActivity> placed = all.stream()
-                .filter(a -> a.getTimeSlot() != null && a.getRoom() != null).toList();
+        List<ScheduledActivity> placed = all.stream().filter(ScheduledActivity::isPlaced).toList();
         List<TimeSlot> slots = timeSlotRepo.findAllByOrderByDayOfWeekAscSlotIndexAsc();
 
         try (Workbook wb = new XSSFWorkbook()) {
@@ -82,16 +81,16 @@ public class ExcelExportService {
             writeMaster(wb, header, cell, all);
             writeGrid(wb, "Pe Grupa", placed, slots, header, cell, slotStyle,
                     a -> a.getStudentGroups().stream().map(g -> g.getName()).sorted().toList(),
-                    a -> a.getSubject().getName() + " (" + a.getActivityType() + ")\n"
-                            + nullSafe(profName(a)) + "\n" + a.getRoom().getName());
+                    a -> a.getSubject().getName() + " (" + typeWithParity(a) + ")\n"
+                            + nullSafe(profName(a)) + "\n" + roomLabel(a));
             writeGrid(wb, "Pe Sala", placed, slots, header, cell, slotStyle,
-                    a -> List.of(a.getRoom().getName()),
-                    a -> a.getSubject().getName() + " (" + a.getActivityType() + ")\n"
+                    a -> List.of(roomLabel(a)),
+                    a -> a.getSubject().getName() + " (" + typeWithParity(a) + ")\n"
                             + String.join(", ", a.getStudentGroups().stream().map(g -> g.getName()).sorted().toList()));
             writeGrid(wb, "Pe Cadru Didactic", placed, slots, header, cell, slotStyle,
                     a -> a.getProfessor() == null ? List.of() : List.of(a.getProfessor().getName()),
-                    a -> a.getSubject().getName() + " (" + a.getActivityType() + ")\n"
-                            + a.getRoom().getName() + "\n"
+                    a -> a.getSubject().getName() + " (" + typeWithParity(a) + ")\n"
+                            + roomLabel(a) + "\n"
                             + String.join(", ", a.getStudentGroups().stream().map(g -> g.getName()).sorted().toList()));
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -234,16 +233,23 @@ public class ExcelExportService {
             if (actR == null) continue;
             Row actRow = s.getRow(actR);
             Row roomRow = s.getRow(actR + 1);
-            String text = fsgcCellText(a);
-            String room = a.getRoom() == null ? "" : a.getRoom().getName();
+            String room = roomLabel(a);
 
-            List<Integer> cols = a.getStudentGroups().stream()
-                    .map(g -> colOf.get(new Section(g.getStudyProgram(), g.getYear(), g.getSpecialization())))
-                    .filter(java.util.Objects::nonNull)
-                    .distinct().sorted().toList();
+            // one column per section the activity is taught to, in the order of the header
+            java.util.Map<Integer, Section> sectionOfCol = new java.util.LinkedHashMap<>();
+            a.getStudentGroups().stream()
+                    .map(g -> new Section(g.getStudyProgram(), g.getYear(), g.getSpecialization()))
+                    .distinct()
+                    .forEach(sec -> {
+                        Integer col = colOf.get(sec);
+                        if (col != null) {
+                            sectionOfCol.putIfAbsent(col, sec);
+                        }
+                    });
+            List<Integer> cols = sectionOfCol.keySet().stream().sorted().toList();
 
             for (int col : cols) {
-                appendCell(actRow.getCell(col), text);
+                appendCell(actRow.getCell(col), fsgcCellText(a, sectionOfCol.get(col)));
                 appendCell(roomRow.getCell(col), room);
             }
             // merge contiguous runs of columns (a common course shown as one wide cell)
@@ -270,13 +276,65 @@ public class ExcelExportService {
     }
 
     /** "Materie, Profesor, tip" — matches the FSGC convention (tip: c=curs, s=seminar, l=laborator). */
-    private static String fsgcCellText(ScheduledActivity a) {
+    /**
+     * What one cell of the weekly grid reads: subject, who teaches it, what kind of hour it is,
+     * which group of that section it is for, and — for an alternating hour — which week. The group
+     * is narrowed to the column's own section: a common course spans several columns, and the
+     * group numbers of a different section would mean nothing under that heading.
+     */
+    private static String fsgcCellText(ScheduledActivity a, Section section) {
         StringBuilder sb = new StringBuilder(a.getSubject().getName());
         if (a.getProfessor() != null) {
             sb.append(", ").append(a.getProfessor().getName());
         }
         sb.append(", ").append(typeAbbrev(a.getActivityType()));
+        String groups = groupLabel(a, section);
+        if (!groups.isEmpty()) {
+            sb.append(", ").append(groups);
+        }
+        String parity = parityLabel(a);
+        if (!parity.isEmpty()) {
+            sb.append(", ").append(parity);
+        }
         return sb.toString();
+    }
+
+    /** "gr. 1" / "gr. 1, 2"; empty when the hour is for the whole year of that section. */
+    private static String groupLabel(ScheduledActivity a, Section section) {
+        List<String> numbers = a.getStudentGroups().stream()
+                .filter(g -> section == null || new Section(g.getStudyProgram(), g.getYear(),
+                        g.getSpecialization()).equals(section))
+                .map(g -> groupNumber(g.getName()))
+                .filter(java.util.Objects::nonNull)
+                .distinct().sorted().toList();
+        return numbers.isEmpty() ? "" : "gr. " + String.join(", ", numbers);
+    }
+
+    /** "MD II_gr.2" -> "2"; null for a group that is a whole year ("J II"). */
+    private static String groupNumber(String name) {
+        if (name == null) {
+            return null;
+        }
+        var m = java.util.regex.Pattern
+                // no \b before "gr": the workbook writes "J I_gr.1", and "_" is a word character
+                .compile("gr(?:upa)?\\.?\\s*(\\d+)\\s*$", java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(name.trim());
+        return m.find() ? m.group(1) : null;
+    }
+
+    /** "SEMINAR" or "SEMINAR, SP" — the week matters wherever the hour is listed. */
+    private static String typeWithParity(ScheduledActivity a) {
+        String parity = parityLabel(a);
+        return parity.isEmpty() ? a.getActivityType().name() : a.getActivityType() + ", " + parity;
+    }
+
+    /** SI for odd weeks, SP for even, empty for an hour held every week. */
+    private static String parityLabel(ScheduledActivity a) {
+        return switch (a.getWeekParity()) {
+            case ODD_WEEKS -> "SI";
+            case EVEN_WEEKS -> "SP";
+            default -> "";
+        };
     }
 
     private static String typeAbbrev(ActivityType t) {
@@ -353,7 +411,7 @@ public class ExcelExportService {
             set(row, 4, a.getSubject().getCode(), cell);
             set(row, 5, a.getActivityType().name(), cell);
             set(row, 6, profName(a), cell);
-            set(row, 7, a.getRoom() == null ? "" : a.getRoom().getName(), cell);
+            set(row, 7, roomLabel(a), cell);
             set(row, 8, String.join(", ", a.getStudentGroups().stream().map(g -> g.getName()).sorted().toList()), cell);
             set(row, 9, Integer.toString(a.totalStudentCount()), cell);
             set(row, 10, a.getWeekParity().name(), cell);
@@ -432,6 +490,14 @@ public class ExcelExportService {
 
     private static String profName(ScheduledActivity a) {
         return a.getProfessor() == null ? "" : a.getProfessor().getName();
+    }
+
+    /** What goes in the room cell: the room, or ONLINE for an activity that has none by design. */
+    private static String roomLabel(ScheduledActivity a) {
+        if (a.getRoom() != null) {
+            return a.getRoom().getName();
+        }
+        return a.isOnline() ? "ONLINE" : "";
     }
 
     private static String nullSafe(String s) {

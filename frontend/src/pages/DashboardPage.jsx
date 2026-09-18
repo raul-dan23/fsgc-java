@@ -29,7 +29,7 @@ export default function DashboardPage() {
   }, []);
 
   const hasData = !!summary && summary.activities > 0;
-  const assigned = schedule ? schedule.filter((a) => a.room).length : 0;
+  const assigned = schedule ? schedule.filter((a) => a.assigned).length : 0;
   const total = schedule ? schedule.length : 0;
   const hasSchedule = total > 0 && assigned > 0;
 

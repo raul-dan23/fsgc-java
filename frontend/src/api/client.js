@@ -172,6 +172,31 @@ export const api = {
   async deleteRule(kind, id) {
     await fetch(`/api/rules/${kind}/${id}`, { method: 'DELETE' });
   },
+  /** Creează dintr-un foc toate perechile (audiență x interval). Ce există deja e sărit. */
+  async addSpecialBlocksBulk(payload) {
+    const res = await fetch('/api/rules/special-blocks/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const { ok, body } = await json(res);
+    if (!ok) {
+      throw new Error((body && body.message) || 'Adăugarea a eșuat.');
+    }
+    return body;
+  },
+  async deleteSpecialBlocks(ids) {
+    const res = await fetch('/api/rules/special-blocks', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(ids),
+    });
+    const { ok, body } = await json(res);
+    if (!ok) {
+      throw new Error((body && body.message) || 'Ștergerea a eșuat.');
+    }
+    return body;
+  },
 
   exportUrl: '/api/export/excel',
 };

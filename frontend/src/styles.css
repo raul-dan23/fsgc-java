@@ -177,6 +177,96 @@ button.danger:hover { background: #a72a22; }
 button.ghost { background: transparent; color: var(--muted); box-shadow: none; border-color: transparent; }
 button.ghost:hover { background: var(--panel-2); color: var(--text); }
 
+/* multi-select: chips pentru audiență, grilă zi x modul pentru intervale */
+.picker-label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 600; color: var(--text-soft);
+  margin: 0 0 6px;
+}
+.picker-label button.ghost { padding: 2px 8px; font-size: 12px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  background: #fff;
+  color: var(--text-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
+}
+.chip:hover { background: var(--panel-2); }
+.chip.on { background: var(--accent-soft); border-color: var(--accent-border); color: var(--brand-700); }
+.chip.on:hover { background: #dbe6fc; }
+.chip .x { margin-left: 6px; font-weight: 700; color: var(--muted); }
+.chip:hover .x { color: var(--bad); }
+.chip:disabled { background: var(--panel-2); color: var(--muted); }
+
+/* ponderi: titlu + explicatie in stanga, cursor si valoare in dreapta */
+.weight-row {
+  display: flex; align-items: flex-start; gap: 18px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.weight-row:first-of-type { border-top: none; }
+.weight-label { flex: 1; min-width: 260px; }
+.weight-label .t { font-size: 14px; font-weight: 600; color: var(--text); }
+.weight-label .d { font-size: 12px; color: var(--muted); line-height: 1.5; margin-top: 2px; }
+.weight-controls {
+  display: flex; align-items: center; gap: 10px;
+  flex: none; padding-top: 2px;
+}
+.weight-controls input[type="range"] { width: 200px; }
+.weight-controls input[type="number"] { width: 72px; }
+@media (max-width: 860px) {
+  .weight-row { flex-direction: column; gap: 8px; }
+}
+
+/* liste de bifat (grupele unei activitati) */
+.check-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11.5px; color: var(--muted); margin-bottom: 4px;
+}
+.check-head button.ghost { padding: 1px 7px; font-size: 11.5px; }
+.check-list {
+  display: flex; flex-direction: column; gap: 1px;
+  max-height: 170px; overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: #fff;
+  padding: 5px 6px;
+}
+.check-list label {
+  display: flex; align-items: center; gap: 7px;
+  padding: 2px 5px; border-radius: 4px;
+  font-size: 12.5px; white-space: nowrap; cursor: pointer;
+}
+.check-list label:hover { background: var(--panel-2); }
+.check-list label.on { background: var(--accent-soft); color: var(--brand-700); font-weight: 600; }
+.check-list input { margin: 0; flex: none; }
+.check-list em { color: var(--muted); font-style: normal; }
+
+.slot-picker { width: auto; font-size: 12px; }
+.slot-picker th, .slot-picker td {
+  padding: 2px; text-align: center; vertical-align: middle;
+  border: none; background: transparent;
+}
+.slot-picker th { white-space: nowrap; }
+.slot-picker th button.ghost { font-size: 12px; padding: 4px 8px; font-weight: 600; }
+.slot-cell {
+  width: 76px; height: 26px; padding: 0;
+  background: #fff; color: var(--accent);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  font-size: 13px; font-weight: 700;
+  box-shadow: none;
+}
+.slot-cell:hover:not(:disabled) { background: var(--accent-soft); }
+.slot-cell.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.slot-cell.on:hover { background: var(--accent-hover); }
+.slot-cell:disabled { background: var(--panel-2); border-style: dashed; cursor: default; }
+
 input, select {
   border: 1px solid var(--border-strong);
   border-radius: var(--r-sm);
@@ -394,11 +484,50 @@ tbody tr:hover td { background: #fbfcfe; }
 .cell-act:hover { box-shadow: var(--shadow-md); }
 .cell-act:active { cursor: grabbing; transform: scale(.99); }
 .cell-act.violation { background: var(--bad-soft); border-color: var(--bad-border); border-left-color: var(--bad); }
+/* online: ora se ține fără sală */
+.cell-act.online { background: linear-gradient(180deg, #f0fbf8, #e3f5f0); border-color: #a8ddd2; border-left-color: #0f766e; }
+.online-tag { color: #0f766e; font-weight: 700; letter-spacing: .02em; }
 .cell-act .t { font-weight: 650; color: var(--text); line-height: 1.25; }
 .cell-act .s { color: var(--muted); font-size: 11px; margin-top: 1px; }
+/* SI / SP: saptamana in care se tine ora alternativa */
+.parity {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  border: 1px solid var(--warn-border);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  vertical-align: 1px;
+}
 
 .grid-cell { min-width: 150px; }
 .grid-cell.over, .dropcol.over td { background: var(--accent-soft) !important; box-shadow: inset 0 0 0 2px var(--accent-border); }
+
+/* interval blocat: rezervat pentru DPPD/CCOC/DCT/limbi — nu se alocă nimic aici */
+.grid-cell.blocked {
+  background: repeating-linear-gradient(135deg,
+    var(--bad-soft), var(--bad-soft) 8px, #f6d2ce 8px, #f6d2ce 16px);
+  box-shadow: inset 0 0 0 1px var(--bad-border);
+  cursor: not-allowed;
+}
+.cell-block {
+  display: inline-block;
+  background: var(--bad);
+  color: #fff;
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .02em;
+}
+.legend .dot.blocked-dot {
+  background: repeating-linear-gradient(135deg,
+    var(--bad-soft), var(--bad-soft) 3px, var(--bad) 3px, var(--bad) 6px);
+}
 .slot-head { white-space: nowrap; font-weight: 600; background: var(--panel-2); }
 
 .tt-room { color: var(--muted); font-size: 11.5px; }

@@ -2,6 +2,7 @@ package ro.uvt.fsgc.orar.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -34,6 +35,10 @@ class AlternatingAudienceTest {
 
     private static final StudentGroup G1 = group("RISE1 - Grupa 1", 27);
     private static final StudentGroup G2 = group("RISE1 - Grupa 2", 28);
+    // the other naming in the workbook, where the group number sits after "gr."
+    private static final StudentGroup MD1 = group("MD II_gr.1", 25);
+    private static final StudentGroup MD2 = group("MD II_gr.2", 25);
+    private static final StudentGroup MD3 = group("MD II_gr.3", 25);
 
     private static List<GroupRef> unmarked(StudentGroup... groups) {
         return java.util.Arrays.stream(groups).map(g -> new GroupRef(g, null)).toList();
@@ -196,40 +201,31 @@ class AlternatingAudienceTest {
     // ----- a row that splits by group twice over -----
 
     @Test
-    void subjectNamedAfterAGroup_withWholeYearAudience_isFlagged() {
-        // "Administratie Publica Grupa 1" + set_studenti naming both groups becomes two seminars,
-        // and the sibling row "... Grupa 2" becomes two more: four hours where two are needed.
-        ro.uvt.fsgc.orar.dto.ImportResult result = new ro.uvt.fsgc.orar.dto.ImportResult();
-        ExcelImportService.warnIfGroupNamedTwice("Administratie Publica Grupa 1",
-                unmarked(G1, G2), result, 42);
-        assertEquals(1, result.getWarnings().size());
-        assertTrue(result.getWarnings().get(0).message().contains("2 seminars"),
-                result.getWarnings().get(0).message());
+    void groupNumberInName_isReadFromTheSuffix() {
+        assertEquals(1, ExcelImportService.groupNumberInName("Administratie Publica Grupa 1"));
+        assertEquals(2, ExcelImportService.groupNumberInName("Depozite Digitale gr.2"));
+        assertEquals(3, ExcelImportService.groupNumberInName("Ceva - Grupa 3"));
+        assertNull(ExcelImportService.groupNumberInName("Administratie Publica"));
+        // a number that is part of the title is not a group
+        assertNull(ExcelImportService.groupNumberInName("Limba Engleza 2"));
     }
 
     @Test
-    void subjectNamedAfterAGroup_withOneGroup_isFine() {
-        // The intended shape: the row names the group and the audience is just that group.
-        ro.uvt.fsgc.orar.dto.ImportResult result = new ro.uvt.fsgc.orar.dto.ImportResult();
-        ExcelImportService.warnIfGroupNamedTwice("Administratie Publica Grupa 1",
-                unmarked(G1), result, 42);
-        assertTrue(result.getWarnings().isEmpty());
+    void stripGroupSuffix_leavesTheDisciplineName() {
+        assertEquals("Administratie Publica",
+                ExcelImportService.stripGroupSuffix("Administratie Publica Grupa 1"));
+        assertEquals("Genuri si Formate in Media Digitala",
+                ExcelImportService.stripGroupSuffix("Genuri si Formate in Media Digitala Grupa 3"));
+        assertEquals("Administratie Publica",
+                ExcelImportService.stripGroupSuffix("Administratie Publica"));
     }
 
     @Test
-    void subjectWithoutGroupInName_isFine() {
-        // The other intended shape: one row for the subject, split per group by the importer.
-        ro.uvt.fsgc.orar.dto.ImportResult result = new ro.uvt.fsgc.orar.dto.ImportResult();
-        ExcelImportService.warnIfGroupNamedTwice("Administratie Publica",
-                unmarked(G1, G2), result, 42);
-        assertTrue(result.getWarnings().isEmpty());
-    }
-
-    @Test
-    void groupNameMustActuallyMatchTheAudience() {
-        // "... Grupa 3" with groups 1 and 2 is a different situation, so stay quiet.
-        ro.uvt.fsgc.orar.dto.ImportResult result = new ro.uvt.fsgc.orar.dto.ImportResult();
-        ExcelImportService.warnIfGroupNamedTwice("Ceva Grupa 3", unmarked(G1, G2), result, 42);
-        assertTrue(result.getWarnings().isEmpty());
+    void groupNumbered_picksTheGroupTheNameMeans() {
+        // the shape in the workbook: "... Grupa 2" with the whole year as audience
+        assertEquals(G2, ExcelImportService.groupNumbered(List.of(G1, G2), 2));
+        assertEquals(MD3, ExcelImportService.groupNumbered(List.of(MD1, MD2, MD3), 3));
+        // no such group: caller keeps the default split and warns
+        assertNull(ExcelImportService.groupNumbered(List.of(G1, G2), 3));
     }
 }

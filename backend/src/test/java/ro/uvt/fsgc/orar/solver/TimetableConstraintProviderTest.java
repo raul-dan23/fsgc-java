@@ -9,9 +9,7 @@ import ro.uvt.fsgc.orar.domain.ActivityType;
 import ro.uvt.fsgc.orar.domain.BlockedDayRule;
 import ro.uvt.fsgc.orar.domain.Building;
 import ro.uvt.fsgc.orar.domain.Professor;
-import ro.uvt.fsgc.orar.domain.ProfessorRoomRestriction;
 import ro.uvt.fsgc.orar.domain.ProfessorUnavailability;
-import ro.uvt.fsgc.orar.domain.RestrictionType;
 import ro.uvt.fsgc.orar.domain.Room;
 import ro.uvt.fsgc.orar.domain.RoomUnavailability;
 import ro.uvt.fsgc.orar.domain.RoomTypology;
@@ -275,6 +273,38 @@ class TimetableConstraintProviderTest {
     }
 
     @Test
+    void specialCategoryBlock_alsoBlocksOtherSpecialCategories() {
+        TimeSlot ts = slot(DayOfWeek.THURSDAY, 5);
+        StudentGroup y1 = group("AP1", "AP", 1, StudyProgram.LICENSE, 40);
+        SpecialBlockRule rule = new SpecialBlockRule();
+        rule.setStudentGroup(y1);
+        rule.setTimeSlot(ts);
+        rule.setCategory(SpecialCategory.DPPD);
+        ScheduledActivity dct = activity(prof("X"), ActivityType.SEMINAR, ts,
+                room("A", 50, RoomTypology.SEMINAR, null), WeekParity.EVERY_WEEK, y1);
+        dct.setSpecialCategory(SpecialCategory.DCT);
+        verifier.verifyThat(TimetableConstraintProvider::specialCategoryBlock)
+                .given(rule, dct)
+                .penalizes(1);
+    }
+
+    @Test
+    void specialCategoryBlock_admitsTheReservedCategoryItself() {
+        TimeSlot ts = slot(DayOfWeek.THURSDAY, 5);
+        StudentGroup y1 = group("AP1", "AP", 1, StudyProgram.LICENSE, 40);
+        SpecialBlockRule rule = new SpecialBlockRule();
+        rule.setStudentGroup(y1);
+        rule.setTimeSlot(ts);
+        rule.setCategory(SpecialCategory.DCT);
+        ScheduledActivity dct = activity(prof("X"), ActivityType.SEMINAR, ts,
+                room("A", 50, RoomTypology.SEMINAR, null), WeekParity.EVERY_WEEK, y1);
+        dct.setSpecialCategory(SpecialCategory.DCT);
+        verifier.verifyThat(TimetableConstraintProvider::specialCategoryBlock)
+                .given(rule, dct)
+                .penalizes(0);
+    }
+
+    @Test
     void professorUnavailability_detected() {
         Professor p = prof("Popescu");
         ProfessorUnavailability u = new ProfessorUnavailability();
@@ -287,37 +317,7 @@ class TimetableConstraintProviderTest {
                 .penalizes(1);
     }
 
-    @Test
-    void professorForbiddenRoom_detected() {
-        Professor p = prof("Popescu");
-        Room forbidden = room("P01", 50, RoomTypology.SEMINAR, null);
-        ProfessorRoomRestriction r = new ProfessorRoomRestriction();
-        r.setProfessor(p);
-        r.setRoom(forbidden);
-        r.setRestrictionType(RestrictionType.FORBIDDEN);
-        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
-        verifier.verifyThat(TimetableConstraintProvider::professorRoomForbidden)
-                .given(r, activity(p, ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 2), forbidden,
-                        WeekParity.EVERY_WEEK, g))
-                .penalizes(1);
-    }
 
-    @Test
-    void professorOnlyThisRoom_detected() {
-        Professor p = prof("Popescu");
-        Room allowed = room("Paris1", 50, RoomTypology.SEMINAR, null);
-        Room other = room("Parvan1", 50, RoomTypology.SEMINAR, null);
-        ProfessorRoomRestriction r = new ProfessorRoomRestriction();
-        r.setProfessor(p);
-        r.setRoom(allowed);
-        r.setRestrictionType(RestrictionType.ONLY_THIS);
-        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
-        // teaching in 'other' while only 'allowed' is whitelisted -> violation
-        verifier.verifyThat(TimetableConstraintProvider::professorRoomOnlyThis)
-                .given(r, activity(p, ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 2), other,
-                        WeekParity.EVERY_WEEK, g))
-                .penalizes(1);
-    }
 
     @Test
     void consecutiveSlotsSameBuilding_detected() {
