@@ -602,3 +602,21 @@ tbody tr:hover td { background: #fbfcfe; }
 
 /* the brand is a link to the dashboard; keep the nav's own styling */
 .nav a.brand:hover { text-decoration: none; }
+
+/* ore fixate manual: lacatul de pe activitate */
+.cell-act.pinned { border-left-color: #7c4dff; box-shadow: inset 2px 0 0 #7c4dff, var(--shadow-sm); }
+.cell-act .t { display: flex; align-items: flex-start; gap: 4px; }
+.pin {
+  margin-left: auto;
+  flex: none;
+  padding: 0 2px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  font-size: 11px;
+  line-height: 1.1;
+  opacity: .35;
+  cursor: pointer;
+}
+.pin:hover { background: transparent; opacity: 1; transform: scale(1.15); }
+.pin.on { opacity: 1; }

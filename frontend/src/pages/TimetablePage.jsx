@@ -42,6 +42,7 @@ export default function TimetablePage() {
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [busyPin, setBusyPin] = useState(false);
   const [zoom, setZoom] = useState(1);
 
   const viewportRef = useRef(null);
@@ -145,6 +146,28 @@ export default function TimetablePage() {
   }, [slots]);
 
   const unplaced = schedule.filter((a) => !a.assigned);
+  const pinnedActs = schedule.filter((a) => a.pinned && a.assigned)
+    .sort((x, y) => WEEK.indexOf(x.day) - WEEK.indexOf(y.day) || x.slotIndex - y.slotIndex);
+
+  /** Fixează / eliberează o oră. Fixată, generarea o lasă exact acolo unde e. */
+  async function togglePin(a) {
+    try {
+      const res = await api.setPinned(a.id, !a.pinned);
+      setSchedule((cur) => cur.map((x) => (x.id === a.id ? { ...x, pinned: res.activity.pinned } : x)));
+      if (!res.activity.pinned) {
+        setToast({ ok: true, msg: `„${a.subject}" nu mai e fixată.` });
+      } else if (res.violations.length === 0) {
+        setToast({ ok: true, msg: `„${a.subject}" e fixată — generarea n-o mai mută.` });
+      } else {
+        // Fixată peste o regulă încălcată: solverul nu o mai poate repara, deci se spune acum.
+        setToast({ ok: false, msg: `„${a.subject}" e fixată aici, dar locul încalcă: `
+          + res.violations.join('; ') + '. Generarea nu va putea repara asta.' });
+      }
+    } catch (e) {
+      setToast({ ok: false, msg: e.message });
+    }
+    setTimeout(() => setToast(null), 5000);
+  }
 
   async function drop(slotId, columnKey, blocked) {
     if (dragId == null) return;
@@ -284,14 +307,35 @@ export default function TimetablePage() {
           <span><span className="dot" style={{ background: '#c1352b' }} />conflict / neplasată</span>
           <span><span className="dot blocked-dot" />interval blocat (nu se alocă nimic)</span>
           <span><span className="dot" style={{ background: '#0f766e' }} />online (fără sală)</span>
+          <span>🔒 oră fixată — generarea n-o mută</span>
           <span>c = curs · s = seminar · l = laborator</span>
         </div>
         <p className="hint">
           Trage o activitate în altă celulă pentru a o muta — mutarea se aplică chiar dacă încalcă o
-          constrângere hard (primești avertisment). Folosește <b>Potrivește</b> sau <b>Ctrl + scroll</b> ca
+          constrângere hard (primești avertisment). Pune-i lacătul (🔒) dacă vrei ca generarea să o
+          lase exact acolo: restul orarului se va construi în jurul ei. Folosește <b>Potrivește</b> sau <b>Ctrl + scroll</b> ca
           să vezi tot orarul dintr-o privire.
         </p>
       </div>
+
+      {pinnedActs.length > 0 && (
+        <div className="panel">
+          <h2>Ore fixate ({pinnedActs.length})</h2>
+          <p className="muted" style={{ marginTop: -6 }}>
+            La următoarea generare rămân exact unde sunt, iar restul orarului se construiește în
+            jurul lor. Click pe lacăt ca să eliberezi una.
+          </p>
+          <div className="chips">
+            {pinnedActs.map((a) => (
+              <button key={a.id} type="button" className="chip on" disabled={busyPin}
+                      title="Click pentru a elibera ora"
+                      onClick={() => togglePin(a)}>
+                🔒 {a.subject} · {(a.groups || []).join(', ')} · {DAY_RO[a.day] || a.day} M{a.slotIndex}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {unplaced.length > 0 && (
         <div className="panel">
@@ -395,13 +439,16 @@ export default function TimetablePage() {
                         {acts.map((a) => (
                           <div key={a.id}
                                className={`cell-act${isBlocked && intrudes(a, blocked) ? ' violation' : ''}`
-                                 + (a.online ? ' online' : '')}
+                                 + (a.online ? ' online' : '') + (a.pinned ? ' pinned' : '')}
                                draggable
                                onDragStart={() => setDragId(a.id)}
                                title={[a.subject, a.professor, abbrev(a.activityType),
                                  groupLabel(a, sec), parityLabel(a), roomLabel(a)]
                                  .filter(Boolean).join(' · ')}>
-                            <div className="t">{a.subject}</div>
+                            <div className="t">
+                              {a.subject}
+                              <PinButton act={a} onToggle={togglePin} />
+                            </div>
                             <div className="s">
                               {[a.professor, abbrev(a.activityType), groupLabel(a, sec)]
                                 .filter(Boolean).join(' · ')}
@@ -473,7 +520,7 @@ export default function TimetablePage() {
                     {acts.map((a) => (
                       <div key={a.id}
                            className={`cell-act${isBlocked && intrudes(a, blocked) ? ' violation' : ''}`
-                             + (a.online ? ' online' : '')}
+                             + (a.online ? ' online' : '') + (a.pinned ? ' pinned' : '')}
                            draggable
                            onDragStart={() => setDragId(a.id)}
                            title={[a.subject, a.professor, abbrev(a.activityType),
@@ -482,6 +529,7 @@ export default function TimetablePage() {
                         <div className="t">
                           {a.subjectCode} · {abbrev(a.activityType)}
                           {parityLabel(a) && <span className="parity">{parityLabel(a)}</span>}
+                          <PinButton act={a} onToggle={togglePin} />
                         </div>
                         <div className="s">{secondary(a, view)}</div>
                       </div>
@@ -495,6 +543,19 @@ export default function TimetablePage() {
       </table>
     );
   }
+}
+
+/** Lacătul de pe o oră: fixată, generarea n-o mai mută. */
+function PinButton({ act, onToggle }) {
+  return (
+    <button type="button" className={`pin${act.pinned ? ' on' : ''}`}
+            title={act.pinned ? 'Fixată — click pentru a elibera'
+              : 'Fixează ora aici, ca generarea să n-o mute'}
+            onClick={(e) => { e.stopPropagation(); onToggle(act); }}
+            onDragStart={(e) => e.preventDefault()}>
+      {act.pinned ? '🔒' : '🔓'}
+    </button>
+  );
 }
 
 function cmpSection(a, b) {

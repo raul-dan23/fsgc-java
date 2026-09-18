@@ -1,6 +1,7 @@
 package ro.uvt.fsgc.orar.domain;
 
 import ai.timefold.solver.core.api.domain.entity.PlanningEntity;
+import ai.timefold.solver.core.api.domain.entity.PlanningPin;
 import ai.timefold.solver.core.api.domain.lookup.PlanningId;
 import ai.timefold.solver.core.api.domain.variable.PlanningVariable;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -79,6 +80,15 @@ public class ScheduledActivity {
     /** True when the original activitate value was "Curs Amfiteatru". */
     @Column(name = "requires_amphitheater", nullable = false)
     private boolean requiresAmphitheater = false;
+
+    /**
+     * Fixed by hand: the solver may not move it. Its slot and room are taken as given and the rest
+     * of the timetable is built around them — that is how a professor's "this hour, this time"
+     * request survives a regeneration. Only an activity that already has a place can be pinned.
+     */
+    @PlanningPin
+    @Column(nullable = false)
+    private boolean pinned = false;
 
     /**
      * Must be held in a room of typology LAB. An activity without this flag is free to go

@@ -59,8 +59,29 @@ public class ScheduleService {
         activity.setTimeSlot(ts);
         // an online hour never takes a room, whatever the grid sent along with the drop
         activity.setRoom(activity.isOnline() ? null : room);
+        if (!activity.isPlaced()) {
+            activity.setPinned(false); // an hour taken off the grid cannot stay fixed to it
+        }
         activityRepo.save(activity);
 
+        return new MoveResult(ActivityMapper.toView(activity), validate(activity));
+    }
+
+    /**
+     * Fixes an activity where it stands, or releases it. Only an hour that already has a slot and
+     * a room can be pinned: pinning an unplaced one would tell the solver to leave it unplaced
+     * for good. Returns the same view + violations a move does, so the UI can warn when someone
+     * pins an hour that already breaks a rule — the next generation will build around it anyway.
+     */
+    @Transactional
+    public MoveResult setPinned(Long activityId, boolean pinned) {
+        ScheduledActivity activity = activityRepo.findById(activityId)
+                .orElseThrow(() -> new IllegalArgumentException("Activity not found: " + activityId));
+        if (pinned && !activity.isPlaced()) {
+            throw new IllegalStateException("Ora trebuie întâi pusă în orar, apoi poate fi fixată.");
+        }
+        activity.setPinned(pinned);
+        activityRepo.save(activity);
         return new MoveResult(ActivityMapper.toView(activity), validate(activity));
     }
 

@@ -2,8 +2,10 @@ package ro.uvt.fsgc.orar.controller;
 
 import java.util.List;
 import java.util.Map;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -85,5 +87,17 @@ public class DataController {
         Long timeSlotId = body.get("timeSlotId");
         Long roomId = body.get("roomId");
         return ResponseEntity.ok(scheduleService.move(id, timeSlotId, roomId));
+    }
+
+    /** Pin an hour where it stands (or release it) so the next generation builds around it. */
+    @PutMapping("/activities/{id}/pin")
+    public ResponseEntity<ScheduleService.MoveResult> pin(@PathVariable Long id,
+                                                          @RequestBody Map<String, Boolean> body) {
+        return ResponseEntity.ok(scheduleService.setPinned(id, Boolean.TRUE.equals(body.get("pinned"))));
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    ResponseEntity<Map<String, String>> onIllegalState(IllegalStateException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", e.getMessage()));
     }
 }

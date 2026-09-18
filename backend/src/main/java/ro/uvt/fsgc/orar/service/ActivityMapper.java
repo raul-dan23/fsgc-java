@@ -48,6 +48,7 @@ public final class ActivityMapper {
                 a.getWeekParity().name(),
                 a.getSpecialCategory().name(),
                 a.isOnline(),
+                a.isPinned(),
                 groups,
                 sections,
                 a.totalStudentCount(),

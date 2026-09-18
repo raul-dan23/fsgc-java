@@ -162,7 +162,15 @@ public class GenerationAdvisor {
                     masterCount, eveningSlots));
         }
 
+        long pinned = activities.stream().filter(ScheduledActivity::isPinned).count();
+        if (pinned > 0) {
+            reasons.add(String.format(
+                    "%d %s fixate manual și rămân pe loc; restul orarului se construiește în jurul lor.",
+                    pinned, pinned == 1 ? "oră este fixată" : "ore sunt"));
+        }
+
         List<String> blockers = structuralBlockers(activities, rooms, nS, eveningSlots, amphiRooms);
+        blockers.addAll(pinnedClashes(activities));
 
         String summary;
         if (!blockers.isEmpty()) {
@@ -180,6 +188,42 @@ public class GenerationAdvisor {
 
         return new BudgetAdvice(quick, recommended, thorough, summary, reasons, blockers,
                 nA, nR, nS, (int) Math.round(occupancy * 100));
+    }
+
+    /**
+     * Pins that contradict each other. The solver cannot move either hour, so it can only report
+     * the clash afterwards — better to say it before anyone waits for a generation.
+     */
+    static List<String> pinnedClashes(List<ScheduledActivity> activities) {
+        List<ScheduledActivity> pinned = activities.stream()
+                .filter(a -> a.isPinned() && a.isPlaced())
+                .toList();
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        for (int i = 0; i < pinned.size(); i++) {
+            for (int j = i + 1; j < pinned.size(); j++) {
+                ScheduledActivity a = pinned.get(i);
+                ScheduledActivity b = pinned.get(j);
+                if (!a.getTimeSlot().getId().equals(b.getTimeSlot().getId())
+                        || !a.parityClashesWith(b)) {
+                    continue;
+                }
+                String when = " în " + a.getTimeSlot().getDayOfWeek() + ", modulul "
+                        + a.getTimeSlot().getSlotIndex() + ".";
+                String pair = "„" + a.getSubject().getName() + "” și „" + b.getSubject().getName() + "”";
+                if (a.getRoom() != null && a.getRoom().equals(b.getRoom())) {
+                    out.add("Două ore fixate cer aceeași sală (" + a.getRoom().getName() + "): "
+                            + pair + when);
+                }
+                if (a.getProfessor() != null && a.getProfessor().equals(b.getProfessor())) {
+                    out.add("Două ore fixate cer același cadru didactic ("
+                            + a.getProfessor().getName() + "): " + pair + when);
+                }
+                if (!java.util.Collections.disjoint(a.getStudentGroups(), b.getStudentGroups())) {
+                    out.add("Două ore fixate cad peste aceeași grupă: " + pair + when);
+                }
+            }
+        }
+        return new ArrayList<>(out);
     }
 
     /** Impossibilities that more solving time cannot fix; each needs a data change instead. */

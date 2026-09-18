@@ -13,6 +13,7 @@ public record ActivityView(
         String weekParity,
         String specialCategory,
         boolean online,
+        boolean pinned,
         List<String> groups,
         List<SectionView> sections,
         int students,

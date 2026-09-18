@@ -64,9 +64,16 @@ public class TimetableDataService {
         s.setSpecialBlockRules(specialBlockRepo.findAll());
         s.setProfessorUnavailabilities(profUnavailRepo.findAll());
 
-        // Touch lazy collections and clear any previous assignment so the solver starts fresh.
+        // Touch lazy collections and clear any previous assignment so the solver starts fresh —
+        // except for the hours someone pinned, which keep theirs and anchor the rest of the solve.
+        // A pin without a placement would mean "pinned nowhere", i.e. never scheduled, so it is
+        // ignored here; the API does not let one be created, but old data might carry one.
         s.getActivities().forEach(a -> {
             a.getStudentGroups().size();
+            if (a.isPinned() && a.isPlaced()) {
+                return;
+            }
+            a.setPinned(false);
             a.setTimeSlot(null);
             a.setRoom(null);
         });

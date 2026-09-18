@@ -300,7 +300,7 @@ public class AdminController {
     public record AdminActivity(Long id, Long subjectId, String subjectCode, String subjectName,
                                 Long professorId, String professorName, String activityType,
                                 String weekParity, String specialCategory, boolean requiresAmphitheater,
-                                boolean requiresLab, boolean online, String rawType,
+                                boolean requiresLab, boolean online, boolean pinned, String rawType,
                                 int durationInSlots, List<Long> groupIds,
                                 List<String> groupNames, int students, String room, String day,
                                 Integer slotIndex, String parityPairKey) {
@@ -337,6 +337,7 @@ public class AdminController {
                 a.isRequiresAmphitheater(),
                 a.isRequiresLab(),
                 a.isOnline(),
+                a.isPinned(),
                 a.getRawType(),
                 a.getDurationInSlots(),
                 groupIds, groupNames, a.totalStudentCount(),

@@ -67,6 +67,19 @@ export const api = {
   async professors() {
     return (await json(await fetch('/api/data/professors'))).body;
   },
+  /** Fixează ora acolo unde e (sau o eliberează), ca generarea să nu o mai mute. */
+  async setPinned(activityId, pinned) {
+    const res = await fetch(`/api/data/activities/${activityId}/pin`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinned }),
+    });
+    const { ok, body } = await json(res);
+    if (!ok) {
+      throw new Error((body && body.message) || 'Fixarea a eșuat.');
+    }
+    return body;
+  },
   async move(activityId, timeSlotId, roomId) {
     const res = await fetch(`/api/data/activities/${activityId}/assignment`, {
       method: 'PUT',
