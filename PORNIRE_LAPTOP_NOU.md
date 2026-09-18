@@ -107,8 +107,57 @@ cd frontend && ORAR_PORT=5281 ORAR_API=http://localhost:8081 npm run dev
 
 Flyway creează schema în baza nouă la prima pornire, deci nu trebuie să pregătești nimic.
 
+### Un laptop pentru fiecare secție
+
+Varianta cea mai curată: fiecare laptop rulează **o singură instanță**, cu porturile implicite.
+Nu trebuie schimbat nimic în configurație — laptopurile diferă doar prin datele din baza lor.
+
+Pe fiecare laptop: instalează Docker, copiază proiectul, `docker compose up -d --build`,
+apoi deschide `http://localhost:5280`. Baza pornește goală.
+
+**Mutarea datelor existente.** Dacă ai deja lucrat pe un laptop (import, ore online, săli
+indisponibile, blocaje, orar generat), nu reimporta Excelul pe laptopul nou — ai pierde tot ce ai
+bifat manual. Copiază baza ca atare.
+
+Pe laptopul unde sunt datele acum, scoate câte un fișier pentru fiecare bază:
+
+```bash
+# instanța A (baza „orar")
+docker exec orar-postgres pg_dump -U orar -d orar --no-owner --no-privileges > baza_A.sql
+
+# instanța B (baza „orar_b"; numele containerului diferă dacă ai pornit cu -p)
+docker exec orar-postgres pg_dump -U orar -d orar_b --no-owner --no-privileges > baza_B.sql
+```
+
+Copiază `baza_A.sql` pe primul laptop și `baza_B.sql` pe al doilea (USB, cloud, oricum).
+Pe laptopul de destinație, **după** ce ai pornit o dată aplicația (ca să existe containerul):
+
+```bash
+docker compose stop backend                     # nimeni nu scrie în timp ce se încarcă
+docker exec orar-postgres psql -U orar -d postgres -c "DROP DATABASE orar;"
+docker exec orar-postgres psql -U orar -d postgres -c "CREATE DATABASE orar OWNER orar;"
+docker exec -i orar-postgres psql -U orar -d orar < baza_A.sql    # sau baza_B.sql
+docker compose start backend
+```
+
+Baza se numește `orar` pe fiecare laptop, indiferent din care instanță vine fișierul — de aceea
+al doilea laptop încarcă `baza_B.sql` într-o bază tot numită `orar`. Fișierul conține și istoricul
+migrărilor, deci aplicația pornește direct pe versiunea corectă a schemei.
+
+Verifică după restaurare, în aplicație: numărul de activități, orele bifate **Online**,
+indisponibilitățile de sală din **Constrângeri** și ponderile. Dacă toate sunt acolo, mutarea a
+reușit.
+
+**Versiunea de PostgreSQL** trebuie să fie aceeași (16, cea din `docker-compose.yml`). Dacă
+folosești `docker compose` pe amândouă laptopurile, este.
+
 ### Sălile
 
 Sunt aceleași săli fizice, dar cele două instanțe nu știu una de alta. Ce împiedică două ore să
 cadă în aceeași sală la aceeași oră trebuie introdus **în fiecare instanță separat**, ca
 indisponibilități de sală în pagina Constrângeri. Aplicația nu verifică asta între instanțe.
+
+Pe două laptopuri separate problema e aceeași, doar că se vede mai greu: fiecare vede doar orarul
+lui. În practică, ori împărțiți sălile între secții din start (fiecare marchează ca indisponibile
+sălile celeilalte), ori, după ce amândouă orarele sunt gata, exportați-le și comparați sălile
+înainte de a le publica.
