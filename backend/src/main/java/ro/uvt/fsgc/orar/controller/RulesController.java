@@ -18,7 +18,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import ro.uvt.fsgc.orar.domain.BlockedDayRule;
+import ro.uvt.fsgc.orar.domain.ProfessorRoomRestriction;
 import ro.uvt.fsgc.orar.domain.ProfessorUnavailability;
+import ro.uvt.fsgc.orar.domain.RestrictionType;
 import ro.uvt.fsgc.orar.domain.RoomAvailability;
 import ro.uvt.fsgc.orar.domain.RoomUnavailability;
 import ro.uvt.fsgc.orar.domain.SpecialBlockRule;
@@ -28,6 +30,7 @@ import ro.uvt.fsgc.orar.domain.StudyProgram;
 import ro.uvt.fsgc.orar.domain.TimeSlot;
 import ro.uvt.fsgc.orar.repository.BlockedDayRuleRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorRepository;
+import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorUnavailabilityRepository;
 import ro.uvt.fsgc.orar.repository.RoomAvailabilityRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
@@ -49,6 +52,7 @@ public class RulesController {
     private final BlockedDayRuleRepository blockedDayRepo;
     private final SpecialBlockRuleRepository specialBlockRepo;
     private final ProfessorUnavailabilityRepository profUnavailRepo;
+    private final ProfessorRoomRestrictionRepository profRoomRepo;
     private final RoomAvailabilityRepository roomAvailRepo;
     private final RoomUnavailabilityRepository roomUnavailRepo;
     private final ProfessorRepository professorRepo;
@@ -58,6 +62,7 @@ public class RulesController {
 
     public RulesController(BlockedDayRuleRepository blockedDayRepo, SpecialBlockRuleRepository specialBlockRepo,
                           ProfessorUnavailabilityRepository profUnavailRepo,
+                          ProfessorRoomRestrictionRepository profRoomRepo,
                           RoomAvailabilityRepository roomAvailRepo,
                           RoomUnavailabilityRepository roomUnavailRepo, ProfessorRepository professorRepo,
                           RoomRepository roomRepo, StudentGroupRepository groupRepo,
@@ -65,6 +70,7 @@ public class RulesController {
         this.blockedDayRepo = blockedDayRepo;
         this.specialBlockRepo = specialBlockRepo;
         this.profUnavailRepo = profUnavailRepo;
+        this.profRoomRepo = profRoomRepo;
         this.roomAvailRepo = roomAvailRepo;
         this.roomUnavailRepo = roomUnavailRepo;
         this.professorRepo = professorRepo;
@@ -278,6 +284,31 @@ public class RulesController {
     @DeleteMapping("/professor-unavailabilities/{id}")
     public ResponseEntity<Void> deleteProfUnavail(@PathVariable Long id) {
         profUnavailRepo.deleteById(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ---------------- professor-room restriction ----------------
+
+    public record ProfRoomReq(Long professorId, Long roomId, RestrictionType restrictionType) {
+    }
+
+    @GetMapping("/professor-room-restrictions")
+    public List<ProfessorRoomRestriction> profRoomRestrictions() {
+        return profRoomRepo.findAll();
+    }
+
+    @PostMapping("/professor-room-restrictions")
+    public ProfessorRoomRestriction addProfRoom(@RequestBody ProfRoomReq req) {
+        ProfessorRoomRestriction r = new ProfessorRoomRestriction();
+        r.setProfessor(professorRepo.findById(req.professorId()).orElseThrow());
+        r.setRoom(roomRepo.findById(req.roomId()).orElseThrow());
+        r.setRestrictionType(req.restrictionType());
+        return profRoomRepo.save(r);
+    }
+
+    @DeleteMapping("/professor-room-restrictions/{id}")
+    public ResponseEntity<Void> deleteProfRoom(@PathVariable Long id) {
+        profRoomRepo.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 

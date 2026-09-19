@@ -31,6 +31,7 @@ import ro.uvt.fsgc.orar.dto.ImportResult;
 import ro.uvt.fsgc.orar.repository.BlockedDayRuleRepository;
 import ro.uvt.fsgc.orar.repository.BuildingRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorRepository;
+import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorUnavailabilityRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
 import ro.uvt.fsgc.orar.repository.ScheduledActivityRepository;
@@ -60,6 +61,7 @@ public class ExcelImportService {
     private final BuildingRepository buildingRepo;
     private final SpecialBlockRuleRepository specialBlockRepo;
     private final ProfessorUnavailabilityRepository profUnavailRepo;
+    private final ProfessorRoomRestrictionRepository profRoomRepo;
     private final BlockedDayRuleRepository blockedDayRepo;
     private final TimeSlotRepository timeSlotRepo;
 
@@ -68,6 +70,7 @@ public class ExcelImportService {
                               ScheduledActivityRepository activityRepo, BuildingRepository buildingRepo,
                               SpecialBlockRuleRepository specialBlockRepo,
                               ProfessorUnavailabilityRepository profUnavailRepo,
+                              ProfessorRoomRestrictionRepository profRoomRepo,
                               BlockedDayRuleRepository blockedDayRepo,
                               TimeSlotRepository timeSlotRepo) {
         this.groupRepo = groupRepo;
@@ -78,6 +81,7 @@ public class ExcelImportService {
         this.buildingRepo = buildingRepo;
         this.specialBlockRepo = specialBlockRepo;
         this.profUnavailRepo = profUnavailRepo;
+        this.profRoomRepo = profRoomRepo;
         this.blockedDayRepo = blockedDayRepo;
         this.timeSlotRepo = timeSlotRepo;
     }
@@ -146,6 +150,7 @@ public class ExcelImportService {
         activityRepo.deleteAllInBatch();
         specialBlockRepo.deleteAllInBatch();
         profUnavailRepo.deleteAllInBatch();
+        profRoomRepo.deleteAllInBatch();
         blockedDayRepo.deleteAllInBatch();
         // Rooms are deliberately NOT deleted. They are matched by name and updated in
         // parseRooms instead, because deleting a room takes its unavailability windows with it

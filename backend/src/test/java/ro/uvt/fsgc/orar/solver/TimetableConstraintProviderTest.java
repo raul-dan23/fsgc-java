@@ -10,6 +10,8 @@ import ro.uvt.fsgc.orar.domain.BlockedDayRule;
 import ro.uvt.fsgc.orar.domain.Building;
 import ro.uvt.fsgc.orar.domain.Professor;
 import ro.uvt.fsgc.orar.domain.ProfessorUnavailability;
+import ro.uvt.fsgc.orar.domain.RestrictionType;
+import ro.uvt.fsgc.orar.domain.ProfessorRoomRestriction;
 import ro.uvt.fsgc.orar.domain.Room;
 import ro.uvt.fsgc.orar.domain.RoomUnavailability;
 import ro.uvt.fsgc.orar.domain.RoomTypology;
@@ -302,6 +304,38 @@ class TimetableConstraintProviderTest {
         verifier.verifyThat(TimetableConstraintProvider::specialCategoryBlock)
                 .given(rule, dct)
                 .penalizes(0);
+    }
+
+    @Test
+    void professorForbiddenRoom_detected() {
+        Professor p = prof("Popescu");
+        Room forbidden = room("P01", 50, RoomTypology.SEMINAR, null);
+        ProfessorRoomRestriction r = new ProfessorRoomRestriction();
+        r.setProfessor(p);
+        r.setRoom(forbidden);
+        r.setRestrictionType(RestrictionType.FORBIDDEN);
+        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
+        verifier.verifyThat(TimetableConstraintProvider::professorRoomForbidden)
+                .given(r, activity(p, ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 2), forbidden,
+                        WeekParity.EVERY_WEEK, g))
+                .penalizes(1);
+    }
+
+    @Test
+    void professorOnlyThisRoom_detected() {
+        Professor p = prof("Popescu");
+        Room allowed = room("Paris1", 50, RoomTypology.SEMINAR, null);
+        Room other = room("Parvan1", 50, RoomTypology.SEMINAR, null);
+        ProfessorRoomRestriction r = new ProfessorRoomRestriction();
+        r.setProfessor(p);
+        r.setRoom(allowed);
+        r.setRestrictionType(RestrictionType.ONLY_THIS);
+        StudentGroup g = group("G1", "G", 1, StudyProgram.LICENSE, 20);
+        // teaching in 'other' while only 'allowed' is whitelisted -> violation
+        verifier.verifyThat(TimetableConstraintProvider::professorRoomOnlyThis)
+                .given(r, activity(p, ActivityType.SEMINAR, slot(DayOfWeek.MONDAY, 2), other,
+                        WeekParity.EVERY_WEEK, g))
+                .penalizes(1);
     }
 
     @Test

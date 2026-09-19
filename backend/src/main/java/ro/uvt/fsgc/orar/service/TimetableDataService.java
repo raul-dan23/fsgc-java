@@ -11,6 +11,7 @@ import ro.uvt.fsgc.orar.domain.ScheduledActivity;
 import ro.uvt.fsgc.orar.domain.TimeSlot;
 import ro.uvt.fsgc.orar.repository.BlockedDayRuleRepository;
 import ro.uvt.fsgc.orar.repository.ConstraintWeightsRepository;
+import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorUnavailabilityRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
 import ro.uvt.fsgc.orar.repository.ScheduledActivityRepository;
@@ -36,12 +37,14 @@ public class TimetableDataService {
     private final BlockedDayRuleRepository blockedDayRepo;
     private final SpecialBlockRuleRepository specialBlockRepo;
     private final ProfessorUnavailabilityRepository profUnavailRepo;
+    private final ProfessorRoomRestrictionRepository profRoomRepo;
     private final ConstraintWeightsRepository weightsRepo;
 
     public TimetableDataService(ScheduledActivityRepository activityRepo, TimeSlotRepository timeSlotRepo,
                                 RoomRepository roomRepo, StudentGroupRepository groupRepo,
                                 BlockedDayRuleRepository blockedDayRepo, SpecialBlockRuleRepository specialBlockRepo,
                                 ProfessorUnavailabilityRepository profUnavailRepo,
+                                ProfessorRoomRestrictionRepository profRoomRepo,
                                 ConstraintWeightsRepository weightsRepo) {
         this.activityRepo = activityRepo;
         this.timeSlotRepo = timeSlotRepo;
@@ -50,6 +53,7 @@ public class TimetableDataService {
         this.blockedDayRepo = blockedDayRepo;
         this.specialBlockRepo = specialBlockRepo;
         this.profUnavailRepo = profUnavailRepo;
+        this.profRoomRepo = profRoomRepo;
         this.weightsRepo = weightsRepo;
     }
 
@@ -63,6 +67,7 @@ public class TimetableDataService {
         s.setBlockedDayRules(blockedDayRepo.findAll());
         s.setSpecialBlockRules(specialBlockRepo.findAll());
         s.setProfessorUnavailabilities(profUnavailRepo.findAll());
+        s.setProfessorRoomRestrictions(profRoomRepo.findAll());
 
         // Touch lazy collections and clear any previous assignment so the solver starts fresh —
         // except for the hours someone pinned, which keep theirs and anchor the rest of the solve.

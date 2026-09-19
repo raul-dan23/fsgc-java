@@ -242,6 +242,14 @@ public class SolverService {
                     "Cadrele didactice nu se programează când sunt indisponibile",
                     "Ora cade peste un interval declarat indisponibil pentru acel cadru didactic.",
                     "Restrânge indisponibilitatea din Constrângeri sau mută ora."};
+            case "Professor forbidden room" -> new String[] {
+                    "Sălile interzise unui cadru didactic",
+                    "Ora a primit o sală marcată ca interzisă pentru acel cadru didactic.",
+                    "Alege altă sală sau ridică restricția din Constrângeri."};
+            case "Professor only-this room" -> new String[] {
+                    "Cadre didactice legate de anumite săli",
+                    "Cadrul didactic poate preda doar în anumite săli, iar acelea nu erau libere.",
+                    "Eliberează una dintre sălile lui sau ridică restricția din Constrângeri."};
             case "Professor day holds together" -> new String[] {
                     "Ziua unui cadru didactic nu se sparge",
                     "Un cadru didactic ar avea ore răsfirate: până în 3 module ziua trebuie să fie"

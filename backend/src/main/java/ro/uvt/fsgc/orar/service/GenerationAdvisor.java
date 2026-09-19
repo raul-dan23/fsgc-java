@@ -11,7 +11,9 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ro.uvt.fsgc.orar.domain.BlockedDayRule;
+import ro.uvt.fsgc.orar.domain.ProfessorRoomRestriction;
 import ro.uvt.fsgc.orar.domain.ProfessorUnavailability;
+import ro.uvt.fsgc.orar.domain.RestrictionType;
 import ro.uvt.fsgc.orar.domain.Room;
 import ro.uvt.fsgc.orar.domain.RoomTypology;
 import ro.uvt.fsgc.orar.domain.ScheduledActivity;
@@ -21,6 +23,7 @@ import ro.uvt.fsgc.orar.domain.TimeSlot;
 import ro.uvt.fsgc.orar.dto.BudgetAdvice;
 import ro.uvt.fsgc.orar.dto.UnassignedDiagnostic;
 import ro.uvt.fsgc.orar.repository.BlockedDayRuleRepository;
+import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorUnavailabilityRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
 import ro.uvt.fsgc.orar.repository.ScheduledActivityRepository;
@@ -49,17 +52,20 @@ public class GenerationAdvisor {
     private final BlockedDayRuleRepository blockedDayRepo;
     private final SpecialBlockRuleRepository specialBlockRepo;
     private final ProfessorUnavailabilityRepository profUnavailRepo;
+    private final ProfessorRoomRestrictionRepository profRoomRepo;
 
     public GenerationAdvisor(ScheduledActivityRepository activityRepo, RoomRepository roomRepo,
                              TimeSlotRepository timeSlotRepo, BlockedDayRuleRepository blockedDayRepo,
                              SpecialBlockRuleRepository specialBlockRepo,
-                             ProfessorUnavailabilityRepository profUnavailRepo) {
+                             ProfessorUnavailabilityRepository profUnavailRepo,
+                             ProfessorRoomRestrictionRepository profRoomRepo) {
         this.activityRepo = activityRepo;
         this.roomRepo = roomRepo;
         this.timeSlotRepo = timeSlotRepo;
         this.blockedDayRepo = blockedDayRepo;
         this.specialBlockRepo = specialBlockRepo;
         this.profUnavailRepo = profUnavailRepo;
+        this.profRoomRepo = profRoomRepo;
     }
 
     // ============================================================ budget advice
@@ -335,10 +341,12 @@ public class GenerationAdvisor {
         List<BlockedDayRule> blockedDays = blockedDayRepo.findAll();
         List<SpecialBlockRule> specialBlocks = specialBlockRepo.findAll();
         List<ProfessorUnavailability> profUnavail = profUnavailRepo.findAll();
+        List<ProfessorRoomRestriction> profRooms = profRoomRepo.findAll();
 
         List<UnassignedDiagnostic> out = new ArrayList<>();
         for (ScheduledActivity a : unplaced) {
-            out.add(diagnoseOne(a, all, rooms, slots, blockedDays, specialBlocks, profUnavail));
+            out.add(diagnoseOne(a, all, rooms, slots, blockedDays, specialBlocks, profUnavail,
+                    profRooms));
         }
         return out;
     }
@@ -347,7 +355,8 @@ public class GenerationAdvisor {
                                              List<Room> rooms, List<TimeSlot> slots,
                                              List<BlockedDayRule> blockedDays,
                                              List<SpecialBlockRule> specialBlocks,
-                                             List<ProfessorUnavailability> profUnavail) {
+                                             List<ProfessorUnavailability> profUnavail,
+                                             List<ProfessorRoomRestriction> profRooms) {
         int students = a.totalStudentCount();
         List<String> groupNames = a.getStudentGroups().stream()
                 .map(StudentGroup::getName).sorted().toList();
@@ -358,7 +367,7 @@ public class GenerationAdvisor {
         for (TimeSlot ts : slots) {
             for (Room room : candidates) {
                 List<String> v = violationsFor(a, ts, room, all, blockedDays, specialBlocks,
-                        profUnavail);
+                        profUnavail, profRooms);
                 options.add(new UnassignedDiagnostic.PlacementOption(
                         ts.getDayOfWeek().name(), ts.getSlotIndex(),
                         ts.getStartTime().format(HM) + " – " + ts.getEndTime().format(HM),
@@ -399,7 +408,8 @@ public class GenerationAdvisor {
     private List<String> violationsFor(ScheduledActivity a, TimeSlot ts, Room room,
                                        List<ScheduledActivity> all, List<BlockedDayRule> blockedDays,
                                        List<SpecialBlockRule> specialBlocks,
-                                       List<ProfessorUnavailability> profUnavail) {
+                                       List<ProfessorUnavailability> profUnavail,
+                                       List<ProfessorRoomRestriction> profRooms) {
         List<String> v = new ArrayList<>();
         int students = a.totalStudentCount();
 
@@ -434,6 +444,28 @@ public class GenerationAdvisor {
                     && a.getSpecialCategory() != r.getCategory() && audienceMatches(a, r)) {
                 v.add("interval rezervat pentru " + r.getCategory());
                 break;
+            }
+        }
+        if (a.getProfessor() != null && room != null) {
+            boolean hasOnlyThis = false;
+            boolean matchesOnlyThis = false;
+            for (ProfessorRoomRestriction r : profRooms) {
+                if (!r.getProfessor().getId().equals(a.getProfessor().getId())) {
+                    continue;
+                }
+                if (r.getRestrictionType() == RestrictionType.FORBIDDEN
+                        && r.getRoom().getId().equals(room.getId())) {
+                    v.add("sală interzisă pentru acest cadru didactic");
+                }
+                if (r.getRestrictionType() == RestrictionType.ONLY_THIS) {
+                    hasOnlyThis = true;
+                    if (r.getRoom().getId().equals(room.getId())) {
+                        matchesOnlyThis = true;
+                    }
+                }
+            }
+            if (hasOnlyThis && !matchesOnlyThis) {
+                v.add("cadrul didactic poate preda doar în altă sală");
             }
         }
         if (a.getProfessor() != null) {

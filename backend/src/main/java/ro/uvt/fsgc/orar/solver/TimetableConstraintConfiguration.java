@@ -25,6 +25,8 @@ public class TimetableConstraintConfiguration {
     public static final String BLOCKED_DAY = "Blocked day for terminal year";
     public static final String SPECIAL_BLOCK = "Special category block";
     public static final String PROFESSOR_UNAVAILABILITY = "Professor unavailability";
+    public static final String PROFESSOR_FORBIDDEN_ROOM = "Professor forbidden room";
+    public static final String PROFESSOR_ONLY_THIS_ROOM = "Professor only-this room";
     public static final String PROFESSOR_DAY_GAPS = "Professor day holds together";
     public static final String CONSECUTIVE_SAME_BUILDING = "Consecutive slots same building";
     public static final String ONLINE_NO_ROOM = "Online activity takes no room";
@@ -66,6 +68,10 @@ public class TimetableConstraintConfiguration {
     private HardMediumSoftScore specialBlock = HardMediumSoftScore.ofHard(1);
     @ConstraintWeight(PROFESSOR_UNAVAILABILITY)
     private HardMediumSoftScore professorUnavailability = HardMediumSoftScore.ofHard(1);
+    @ConstraintWeight(PROFESSOR_FORBIDDEN_ROOM)
+    private HardMediumSoftScore professorForbiddenRoom = HardMediumSoftScore.ofHard(1);
+    @ConstraintWeight(PROFESSOR_ONLY_THIS_ROOM)
+    private HardMediumSoftScore professorOnlyThisRoom = HardMediumSoftScore.ofHard(1);
     @ConstraintWeight(PROFESSOR_DAY_GAPS)
     private HardMediumSoftScore professorDayGaps = HardMediumSoftScore.ofHard(1);
     @ConstraintWeight(CONSECUTIVE_SAME_BUILDING)
@@ -113,6 +119,8 @@ public class TimetableConstraintConfiguration {
     public HardMediumSoftScore getBlockedDay() { return blockedDay; }
     public HardMediumSoftScore getSpecialBlock() { return specialBlock; }
     public HardMediumSoftScore getProfessorUnavailability() { return professorUnavailability; }
+    public HardMediumSoftScore getProfessorForbiddenRoom() { return professorForbiddenRoom; }
+    public HardMediumSoftScore getProfessorOnlyThisRoom() { return professorOnlyThisRoom; }
     public HardMediumSoftScore getProfessorDayGaps() { return professorDayGaps; }
     public HardMediumSoftScore getConsecutiveSameBuilding() { return consecutiveSameBuilding; }
     public HardMediumSoftScore getOnlineNoRoom() { return onlineNoRoom; }

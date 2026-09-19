@@ -6,6 +6,10 @@ const DAY_RO = {
   MONDAY: 'Luni', TUESDAY: 'Marți', WEDNESDAY: 'Miercuri', THURSDAY: 'Joi', FRIDAY: 'Vineri',
 };
 const PROGRAM_RO = { LICENSE: 'Licență', MASTER: 'Master' };
+const RESTRICTION_RO = {
+  FORBIDDEN: 'Nu poate preda în această sală',
+  ONLY_THIS: 'Poate preda doar în această sală',
+};
 const CATEGORY_RO = {
   DPPD: 'DPPD', CCOC: 'CCOC', DCT: 'DCT', LIMBI_STRAINE: 'Limbi străine',
 };
@@ -185,6 +189,30 @@ export default function ConstraintsPage() {
           chip: (r) => `${DAY_RO[r.dayOfWeek] || r.dayOfWeek} ${r.startTime
             ? `${hhmm(r.startTime)}–${hhmm(r.endTime) || '…'}` : 'toată ziua'}`,
           rank: (r) => DAYS.indexOf(r.dayOfWeek) * 10000 + minutesOf(r.startTime),
+        }}
+      />
+
+      <RuleSection
+        title="Săli interzise / rezervate unui cadru didactic"
+        hint="„Nu poate preda” scoate sala din discuție pentru acel cadru didactic. „Poate preda doar” e mai tare: dacă un cadru didactic are măcar o astfel de regulă, orele lui intră numai în sălile trecute aici."
+        kind="professor-room-restrictions"
+        fields={[
+          { name: 'professorId', label: 'Cadrul didactic', type: 'entity', options: professors, required: true },
+          { name: 'restrictionType', label: 'Regula', type: 'select',
+            options: Object.keys(RESTRICTION_RO), labels: RESTRICTION_RO, required: true },
+          { name: 'roomId', label: 'Sala', type: 'entity', options: rooms, required: true },
+        ]}
+        columns={[
+          { label: 'Cadru didactic', render: (r) => (r.professor ? r.professor.name : '—') },
+          { label: 'Regula', render: (r) => RESTRICTION_RO[r.restrictionType] || r.restrictionType },
+          { label: 'Sala', render: (r) => (r.room ? r.room.name : '—') },
+        ]}
+        group={{
+          header: 'Cadru didactic',
+          by: (r) => (r.professor ? r.professor.id : 0),
+          label: (r) => (r.professor ? r.professor.name : '—'),
+          chip: (r) => `${r.restrictionType === 'ONLY_THIS' ? 'doar' : 'fără'} ${r.room ? r.room.name : '?'}`,
+          rank: (r) => (r.restrictionType === 'ONLY_THIS' ? 0 : 1),
         }}
       />
 

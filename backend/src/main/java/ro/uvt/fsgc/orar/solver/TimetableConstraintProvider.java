@@ -10,7 +10,9 @@ import java.time.DayOfWeek;
 import java.util.Collections;
 import java.util.List;
 import ro.uvt.fsgc.orar.domain.BlockedDayRule;
+import ro.uvt.fsgc.orar.domain.ProfessorRoomRestriction;
 import ro.uvt.fsgc.orar.domain.ProfessorUnavailability;
+import ro.uvt.fsgc.orar.domain.RestrictionType;
 import ro.uvt.fsgc.orar.domain.Room;
 import ro.uvt.fsgc.orar.domain.RoomTypology;
 import ro.uvt.fsgc.orar.domain.ScheduledActivity;
@@ -46,6 +48,8 @@ public class TimetableConstraintProvider implements ConstraintProvider {
                 blockedDayForTerminalYear(f),
                 specialCategoryBlock(f),
                 professorUnavailability(f),
+                professorRoomForbidden(f),
+                professorRoomOnlyThis(f),
                 professorDayGaps(f),
                 consecutiveSlotsSameBuilding(f),
                 onlineTakesNoRoom(f),
@@ -198,6 +202,36 @@ public class TimetableConstraintProvider implements ConstraintProvider {
                         a.getTimeSlot().getStartTime(), a.getTimeSlot().getEndTime()))
                 .penalizeConfigurable()
                 .asConstraint(PROFESSOR_UNAVAILABILITY);
+    }
+
+    /** 11a. A professor may not teach in a room explicitly forbidden to them. */
+    Constraint professorRoomForbidden(ConstraintFactory f) {
+        return f.forEach(ScheduledActivity.class)
+                .filter(a -> a.getProfessor() != null)
+                .join(ProfessorRoomRestriction.class, Joiners.equal(
+                        ScheduledActivity::getProfessor, ProfessorRoomRestriction::getProfessor))
+                .filter((a, r) -> r.getRestrictionType() == RestrictionType.FORBIDDEN
+                        && r.getRoom().equals(a.getRoom()))
+                .penalizeConfigurable()
+                .asConstraint(PROFESSOR_FORBIDDEN_ROOM);
+    }
+
+    /**
+     * 11b. If a professor has any ONLY_THIS room rule, they may teach only in those rooms:
+     * a violation is an activity whose professor has a whitelist but whose room is not on it.
+     */
+    Constraint professorRoomOnlyThis(ConstraintFactory f) {
+        return f.forEach(ScheduledActivity.class)
+                .filter(a -> a.getProfessor() != null)
+                .ifExists(ProfessorRoomRestriction.class,
+                        Joiners.equal(ScheduledActivity::getProfessor, ProfessorRoomRestriction::getProfessor),
+                        Joiners.filtering((a, r) -> r.getRestrictionType() == RestrictionType.ONLY_THIS))
+                .ifNotExists(ProfessorRoomRestriction.class,
+                        Joiners.equal(ScheduledActivity::getProfessor, ProfessorRoomRestriction::getProfessor),
+                        Joiners.equal(ScheduledActivity::getRoom, ProfessorRoomRestriction::getRoom),
+                        Joiners.filtering((a, r) -> r.getRestrictionType() == RestrictionType.ONLY_THIS))
+                .penalizeConfigurable()
+                .asConstraint(PROFESSOR_ONLY_THIS_ROOM);
     }
 
     /**
