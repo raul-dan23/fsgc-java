@@ -236,9 +236,13 @@ export default function TimetablePage() {
     try {
       const res = await api.move(dragId, slotId, roomId ?? null);
       const v = res.violations;
+      // spune și unde a ajuns: la drop pe secție sala e aleasă automat, deci nu e evidentă
+      const unde = `${res.activity.subject} · ${DAY_RO[res.activity.day] || res.activity.day}`
+        + ` M${res.activity.slotIndex}`
+        + (res.activity.online ? ' · ONLINE' : ` · sala ${res.activity.room}`);
       setToast(v.length === 0
-        ? { ok: true, msg: 'Mutare aplicată, fără încălcări.' }
-        : { ok: false, msg: 'Mutare aplicată cu încălcări: ' + v.join('; ') });
+        ? { ok: true, msg: `${unde} — fără încălcări.` }
+        : { ok: false, msg: `${unde} — cu încălcări: ` + v.join('; ') });
       reload();
     } catch (e) {
       setToast({ ok: false, msg: e.message });

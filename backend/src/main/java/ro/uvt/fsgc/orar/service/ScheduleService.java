@@ -2,10 +2,12 @@ package ro.uvt.fsgc.orar.service;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ro.uvt.fsgc.orar.domain.Room;
+import ro.uvt.fsgc.orar.domain.RoomTypology;
 import ro.uvt.fsgc.orar.domain.ScheduledActivity;
 import ro.uvt.fsgc.orar.domain.SpecialBlockRule;
 import ro.uvt.fsgc.orar.domain.TimeSlot;
@@ -57,6 +59,12 @@ public class ScheduleService {
                 new IllegalArgumentException("Room not found: " + roomId));
 
         activity.setTimeSlot(ts);
+        // Dropped on a day + module without naming a room (the grid on sections has no room
+        // column), so one is chosen here. Without it the hour would keep its slot, stay
+        // room-less, and therefore count as unplaced — it would vanish from the grid again.
+        if (room == null && ts != null && !activity.isOnline()) {
+            room = pickRoom(activity, ts);
+        }
         // an online hour never takes a room, whatever the grid sent along with the drop
         activity.setRoom(activity.isOnline() ? null : room);
         if (!activity.isPlaced()) {
@@ -65,6 +73,60 @@ public class ScheduleService {
         activityRepo.save(activity);
 
         return new MoveResult(ActivityMapper.toView(activity), validate(activity));
+    }
+
+    /**
+     * The room to drop an hour into when the person did not name one. Prefers a room that is
+     * genuinely free — right type, big enough, not marked unavailable, nobody else in it at that
+     * hour — and among those the smallest, the same way the solver avoids wasting a big room.
+     * When nothing is free it still returns the least bad room rather than leaving the hour
+     * room-less: the caller reports what the placement breaks, and the person decides.
+     */
+    private Room pickRoom(ScheduledActivity activity, TimeSlot ts) {
+        List<Room> rooms = roomRepo.findAll();
+        if (rooms.isEmpty()) {
+            return null;
+        }
+        List<ScheduledActivity> others = activityRepo.findAll().stream()
+                .filter(o -> !o.getId().equals(activity.getId()))
+                .filter(o -> o.getTimeSlot() != null && o.getRoom() != null)
+                .filter(o -> o.getTimeSlot().getId().equals(ts.getId()))
+                .filter(activity::parityClashesWith)
+                .toList();
+
+        Comparator<Room> smallestFirst = Comparator.comparingInt(Room::getCapacity);
+        List<Room> rightType = rooms.stream().filter(r -> typeFits(activity, r)).toList();
+        List<Room> candidates = rightType.isEmpty() ? rooms : rightType;
+
+        return candidates.stream()
+                .filter(r -> r.getCapacity() >= activity.totalStudentCount())
+                .filter(r -> free(r, ts, others))
+                .min(smallestFirst)
+                // nothing free and big enough: take the roomiest of the right type instead
+                .or(() -> candidates.stream().filter(r -> free(r, ts, others)).max(smallestFirst))
+                .or(() -> candidates.stream()
+                        .filter(r -> r.getCapacity() >= activity.totalStudentCount())
+                        .min(smallestFirst))
+                .orElseGet(() -> candidates.stream().max(smallestFirst).orElse(null));
+    }
+
+    private static boolean typeFits(ScheduledActivity a, Room r) {
+        if (a.isRequiresLab()) {
+            return r.getTypology() == RoomTypology.LAB;
+        }
+        if (a.isRequiresAmphitheater()) {
+            return r.getTypology() == RoomTypology.AMPHITHEATER;
+        }
+        return true;
+    }
+
+    /** Free = nobody clashing in it at that hour, and not marked unavailable then. */
+    private static boolean free(Room r, TimeSlot ts, List<ScheduledActivity> othersInSlot) {
+        boolean taken = othersInSlot.stream()
+                .anyMatch(o -> o.getRoom().getId().equals(r.getId()));
+        boolean closed = r.getUnavailabilities().stream()
+                .anyMatch(u -> u.overlaps(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime()));
+        return !taken && !closed;
     }
 
     /** How much was cleared, so the UI can say it plainly. */
