@@ -19,6 +19,7 @@ import ro.uvt.fsgc.orar.domain.StudyProgram;
 import ro.uvt.fsgc.orar.domain.Subject;
 import ro.uvt.fsgc.orar.domain.TimeSlot;
 import ro.uvt.fsgc.orar.domain.WeekParity;
+import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
 import ro.uvt.fsgc.orar.repository.ScheduledActivityRepository;
 import ro.uvt.fsgc.orar.repository.SpecialBlockRuleRepository;
@@ -33,7 +34,7 @@ class ClearScheduleTest {
     private final ScheduledActivityRepository activityRepo = mock(ScheduledActivityRepository.class);
     private final ScheduleService service = new ScheduleService(activityRepo,
             mock(TimeSlotRepository.class), mock(RoomRepository.class),
-            mock(SpecialBlockRuleRepository.class));
+            mock(SpecialBlockRuleRepository.class), mock(ProfessorRoomRestrictionRepository.class));
 
     private static ScheduledActivity activity(long id, boolean placed, boolean pinned) {
         ScheduledActivity a = new ScheduledActivity();

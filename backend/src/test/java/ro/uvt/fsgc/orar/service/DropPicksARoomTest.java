@@ -13,6 +13,9 @@ import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import ro.uvt.fsgc.orar.domain.ActivityType;
+import ro.uvt.fsgc.orar.domain.Professor;
+import ro.uvt.fsgc.orar.domain.ProfessorRoomRestriction;
+import ro.uvt.fsgc.orar.domain.RestrictionType;
 import ro.uvt.fsgc.orar.domain.Room;
 import ro.uvt.fsgc.orar.domain.RoomTypology;
 import ro.uvt.fsgc.orar.domain.RoomUnavailability;
@@ -22,6 +25,7 @@ import ro.uvt.fsgc.orar.domain.StudyProgram;
 import ro.uvt.fsgc.orar.domain.Subject;
 import ro.uvt.fsgc.orar.domain.TimeSlot;
 import ro.uvt.fsgc.orar.domain.WeekParity;
+import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
 import ro.uvt.fsgc.orar.repository.ScheduledActivityRepository;
 import ro.uvt.fsgc.orar.repository.SpecialBlockRuleRepository;
@@ -37,8 +41,10 @@ class DropPicksARoomTest {
     private final ScheduledActivityRepository activityRepo = mock(ScheduledActivityRepository.class);
     private final TimeSlotRepository timeSlotRepo = mock(TimeSlotRepository.class);
     private final RoomRepository roomRepo = mock(RoomRepository.class);
+    private final ProfessorRoomRestrictionRepository profRoomRepo =
+            mock(ProfessorRoomRestrictionRepository.class);
     private final ScheduleService service = new ScheduleService(activityRepo, timeSlotRepo,
-            roomRepo, mock(SpecialBlockRuleRepository.class));
+            roomRepo, mock(SpecialBlockRuleRepository.class), profRoomRepo);
 
     private static final TimeSlot MON1 = new TimeSlot(11L, DayOfWeek.MONDAY, 1,
             LocalTime.of(8, 0), LocalTime.of(9, 30));
@@ -78,6 +84,7 @@ class DropPicksARoomTest {
         when(activityRepo.save(any(ScheduledActivity.class))).thenAnswer(i -> i.getArgument(0));
         when(timeSlotRepo.findById(11L)).thenReturn(Optional.of(MON1));
         when(roomRepo.findAll()).thenReturn(rooms);
+        when(profRoomRepo.findAll()).thenReturn(List.of());
     }
 
     @Test
@@ -139,6 +146,80 @@ class DropPicksARoomTest {
                 room(4, "521", 33, RoomTypology.LAB)), a);
 
         assertThat(service.move(1L, 11L, null).activity().room()).isEqualTo("521");
+    }
+
+    @Test
+    void aRoomTheProfessorMayNotUseIsNotChosen() {
+        // the bug this was written for: an hour of someone barred from P01 landed in P01
+        Professor prof = new Professor();
+        prof.setId(7L);
+        prof.setName("Gencia");
+        ScheduledActivity a = activity(1, 20);
+        a.setProfessor(prof);
+        Room p01 = room(5, "P01", 26, RoomTypology.SEMINAR);
+        Room r130 = room(3, "130", 50, RoomTypology.SEMINAR);
+        world(List.of(p01, r130), a);
+        ProfessorRoomRestriction no = new ProfessorRoomRestriction();
+        no.setProfessor(prof);
+        no.setRoom(p01);
+        no.setRestrictionType(RestrictionType.FORBIDDEN);
+        when(profRoomRepo.findAll()).thenReturn(List.of(no));
+
+        ScheduleService.MoveResult res = service.move(1L, 11L, null);
+
+        assertThat(res.activity().room()).as("P01 is the smallest, but it is barred").isEqualTo("130");
+        assertThat(res.violations()).isEmpty();
+    }
+
+    @Test
+    void aWhitelistNarrowsTheChoiceToItsRooms() {
+        Professor prof = new Professor();
+        prof.setId(8L);
+        prof.setName("Popescu");
+        ScheduledActivity a = activity(1, 20);
+        a.setProfessor(prof);
+        Room small = room(2, "028", 30, RoomTypology.SEMINAR);
+        Room only = room(3, "130", 50, RoomTypology.SEMINAR);
+        world(List.of(small, only), a);
+        ProfessorRoomRestriction yes = new ProfessorRoomRestriction();
+        yes.setProfessor(prof);
+        yes.setRoom(only);
+        yes.setRestrictionType(RestrictionType.ONLY_THIS);
+        when(profRoomRepo.findAll()).thenReturn(List.of(yes));
+
+        assertThat(service.move(1L, 11L, null).activity().room()).isEqualTo("130");
+    }
+
+    @Test
+    void theOfferedRoomsSayWhyTheOthersDoNotFit() {
+        Professor prof = new Professor();
+        prof.setId(9L);
+        prof.setName("Gencia");
+        ScheduledActivity a = activity(1, 20);
+        a.setProfessor(prof);
+        Room p01 = room(5, "P01", 26, RoomTypology.SEMINAR);
+        Room tiny = room(6, "518", 10, RoomTypology.SEMINAR);
+        Room ok = room(3, "130", 50, RoomTypology.SEMINAR);
+        a.setTimeSlot(MON1);
+        world(List.of(p01, tiny, ok), a);
+        ProfessorRoomRestriction no = new ProfessorRoomRestriction();
+        no.setProfessor(prof);
+        no.setRoom(p01);
+        no.setRestrictionType(RestrictionType.FORBIDDEN);
+        when(profRoomRepo.findAll()).thenReturn(List.of(no));
+
+        List<ScheduleService.RoomOption> options = service.roomOptions(1L, 11L);
+
+        assertThat(options).extracting(ScheduleService.RoomOption::name)
+                .containsExactly("130", "518", "P01");
+        assertThat(options).filteredOn(ScheduleService.RoomOption::usable)
+                .extracting(ScheduleService.RoomOption::name).containsExactly("130");
+        assertThat(options).filteredOn(o -> "P01".equals(o.name())).first()
+                .extracting(ScheduleService.RoomOption::reason)
+                .asString().contains("interzisă pentru Gencia");
+        assertThat(options).filteredOn(o -> "518".equals(o.name())).first()
+                .extracting(ScheduleService.RoomOption::reason)
+                .asString().contains("prea mică");
     }
 
     @Test

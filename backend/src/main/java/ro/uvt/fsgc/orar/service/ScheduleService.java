@@ -6,12 +6,15 @@ import java.util.Comparator;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import ro.uvt.fsgc.orar.domain.ProfessorRoomRestriction;
+import ro.uvt.fsgc.orar.domain.RestrictionType;
 import ro.uvt.fsgc.orar.domain.Room;
 import ro.uvt.fsgc.orar.domain.RoomTypology;
 import ro.uvt.fsgc.orar.domain.ScheduledActivity;
 import ro.uvt.fsgc.orar.domain.SpecialBlockRule;
 import ro.uvt.fsgc.orar.domain.TimeSlot;
 import ro.uvt.fsgc.orar.dto.ActivityView;
+import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
 import ro.uvt.fsgc.orar.repository.ScheduledActivityRepository;
 import ro.uvt.fsgc.orar.repository.SpecialBlockRuleRepository;
@@ -29,13 +32,16 @@ public class ScheduleService {
     private final TimeSlotRepository timeSlotRepo;
     private final RoomRepository roomRepo;
     private final SpecialBlockRuleRepository specialBlockRepo;
+    private final ProfessorRoomRestrictionRepository profRoomRepo;
 
     public ScheduleService(ScheduledActivityRepository activityRepo, TimeSlotRepository timeSlotRepo,
-                           RoomRepository roomRepo, SpecialBlockRuleRepository specialBlockRepo) {
+                           RoomRepository roomRepo, SpecialBlockRuleRepository specialBlockRepo,
+                           ProfessorRoomRestrictionRepository profRoomRepo) {
         this.activityRepo = activityRepo;
         this.roomRepo = roomRepo;
         this.timeSlotRepo = timeSlotRepo;
         this.specialBlockRepo = specialBlockRepo;
+        this.profRoomRepo = profRoomRepo;
     }
 
     @Transactional(readOnly = true)
@@ -75,6 +81,107 @@ public class ScheduleService {
         return new MoveResult(ActivityMapper.toView(activity), validate(activity));
     }
 
+    /** A room offered for an hour, and why it cannot be used when it cannot. */
+    public record RoomOption(Long id, String name, int capacity, String typology,
+                             boolean usable, String reason) {
+    }
+
+    /**
+     * Every room, said plainly: which ones this hour can actually use at that time and, for the
+     * rest, what stands in the way. The grid offers this when someone wants to change the room
+     * chosen automatically, so the choice is made from real options instead of guesswork.
+     */
+    @Transactional(readOnly = true)
+    public List<RoomOption> roomOptions(Long activityId, Long timeSlotId) {
+        ScheduledActivity activity = activityRepo.findById(activityId)
+                .orElseThrow(() -> new IllegalArgumentException("Activity not found: " + activityId));
+        TimeSlot ts = timeSlotId != null
+                ? timeSlotRepo.findById(timeSlotId).orElseThrow(() ->
+                        new IllegalArgumentException("Time slot not found: " + timeSlotId))
+                : activity.getTimeSlot();
+        if (ts == null) {
+            throw new IllegalStateException("Ora nu are încă interval, așa că nu are nevoie de sală.");
+        }
+        List<ScheduledActivity> others = othersIn(activity, ts);
+        List<ProfessorRoomRestriction> restrictions = profRoomRepo.findAll();
+        return roomRepo.findAll().stream()
+                .sorted(Comparator.comparing(Room::getName))
+                .map(r -> new RoomOption(r.getId(), r.getName(), r.getCapacity(),
+                        r.getTypology() == null ? null : r.getTypology().name(),
+                        whyNot(activity, r, ts, others, restrictions) == null,
+                        whyNot(activity, r, ts, others, restrictions)))
+                .toList();
+    }
+
+    /** Null when the room fits the hour at that time; otherwise the reason it does not. */
+    private static String whyNot(ScheduledActivity a, Room r, TimeSlot ts,
+                                 List<ScheduledActivity> othersInSlot,
+                                 List<ProfessorRoomRestriction> restrictions) {
+        if (!typeFits(a, r)) {
+            return a.isRequiresLab() ? "nu e laborator" : "nu e amfiteatru";
+        }
+        if (r.getCapacity() < a.totalStudentCount()) {
+            return "prea mică (" + r.getCapacity() + " locuri, " + a.totalStudentCount() + " studenți)";
+        }
+        if (r.getUnavailabilities().stream()
+                .anyMatch(u -> u.overlaps(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime()))) {
+            return "indisponibilă în acest interval";
+        }
+        String busy = othersInSlot.stream()
+                .filter(o -> o.getRoom().getId().equals(r.getId()))
+                .map(o -> o.getSubject().getName())
+                .findFirst().orElse(null);
+        if (busy != null) {
+            return "ocupată de „" + busy + "”";
+        }
+        String forbidden = forbiddenFor(a, r, restrictions);
+        if (forbidden != null) {
+            return forbidden;
+        }
+        return null;
+    }
+
+    /**
+     * The professor's own room rules: a room ruled out for them, or — when they have a whitelist —
+     * every room that is not on it. Missing this was how an hour of someone who may not teach in
+     * P01 ended up in P01.
+     */
+    private static String forbiddenFor(ScheduledActivity a, Room r,
+                                       List<ProfessorRoomRestriction> restrictions) {
+        if (a.getProfessor() == null) {
+            return null;
+        }
+        List<ProfessorRoomRestriction> mine = restrictions.stream()
+                .filter(x -> x.getProfessor() != null
+                        && x.getProfessor().getId().equals(a.getProfessor().getId()))
+                .toList();
+        boolean forbidden = mine.stream()
+                .anyMatch(x -> x.getRestrictionType() == RestrictionType.FORBIDDEN
+                        && x.getRoom().getId().equals(r.getId()));
+        if (forbidden) {
+            return "interzisă pentru " + a.getProfessor().getName();
+        }
+        List<ProfessorRoomRestriction> onlyThis = mine.stream()
+                .filter(x -> x.getRestrictionType() == RestrictionType.ONLY_THIS)
+                .toList();
+        if (!onlyThis.isEmpty()
+                && onlyThis.stream().noneMatch(x -> x.getRoom().getId().equals(r.getId()))) {
+            return a.getProfessor().getName() + " poate preda doar în "
+                    + String.join(", ", onlyThis.stream().map(x -> x.getRoom().getName()).toList());
+        }
+        return null;
+    }
+
+    /** The activities that would clash with this one in that slot (parity aware). */
+    private List<ScheduledActivity> othersIn(ScheduledActivity activity, TimeSlot ts) {
+        return activityRepo.findAll().stream()
+                .filter(o -> !o.getId().equals(activity.getId()))
+                .filter(o -> o.getTimeSlot() != null && o.getRoom() != null)
+                .filter(o -> o.getTimeSlot().getId().equals(ts.getId()))
+                .filter(activity::parityClashesWith)
+                .toList();
+    }
+
     /**
      * The room to drop an hour into when the person did not name one. Prefers a room that is
      * genuinely free — right type, big enough, not marked unavailable, nobody else in it at that
@@ -87,27 +194,30 @@ public class ScheduleService {
         if (rooms.isEmpty()) {
             return null;
         }
-        List<ScheduledActivity> others = activityRepo.findAll().stream()
-                .filter(o -> !o.getId().equals(activity.getId()))
-                .filter(o -> o.getTimeSlot() != null && o.getRoom() != null)
-                .filter(o -> o.getTimeSlot().getId().equals(ts.getId()))
-                .filter(activity::parityClashesWith)
-                .toList();
-
+        List<ScheduledActivity> others = othersIn(activity, ts);
+        List<ProfessorRoomRestriction> restrictions = profRoomRepo.findAll();
         Comparator<Room> smallestFirst = Comparator.comparingInt(Room::getCapacity);
-        List<Room> rightType = rooms.stream().filter(r -> typeFits(activity, r)).toList();
-        List<Room> candidates = rightType.isEmpty() ? rooms : rightType;
 
-        return candidates.stream()
-                .filter(r -> r.getCapacity() >= activity.totalStudentCount())
-                .filter(r -> free(r, ts, others))
+        // A room the professor may not use is not a candidate at all, not even a last resort.
+        List<Room> allowed = rooms.stream()
+                .filter(r -> forbiddenFor(activity, r, restrictions) == null)
+                .toList();
+        List<Room> candidates = allowed.isEmpty() ? rooms : allowed;
+        List<Room> rightType = candidates.stream().filter(r -> typeFits(activity, r)).toList();
+        if (!rightType.isEmpty()) {
+            candidates = rightType;
+        }
+        final List<Room> pool = candidates;
+
+        return pool.stream()
+                .filter(r -> whyNot(activity, r, ts, others, restrictions) == null)
                 .min(smallestFirst)
-                // nothing free and big enough: take the roomiest of the right type instead
-                .or(() -> candidates.stream().filter(r -> free(r, ts, others)).max(smallestFirst))
-                .or(() -> candidates.stream()
+                // nothing entirely free: the roomiest that is at least not taken, then the rest
+                .or(() -> pool.stream().filter(r -> free(r, ts, others)).max(smallestFirst))
+                .or(() -> pool.stream()
                         .filter(r -> r.getCapacity() >= activity.totalStudentCount())
                         .min(smallestFirst))
-                .orElseGet(() -> candidates.stream().max(smallestFirst).orElse(null));
+                .orElseGet(() -> pool.stream().max(smallestFirst).orElse(null));
     }
 
     private static boolean typeFits(ScheduledActivity a, Room r) {
@@ -218,6 +328,12 @@ public class ScheduleService {
         if (activity.isRequiresLab() && room != null
                 && room.getTypology() != ro.uvt.fsgc.orar.domain.RoomTypology.LAB) {
             violations.add("Activitatea trebuie ținută într-un laborator");
+        }
+        if (room != null) {
+            String forbidden = forbiddenFor(activity, room, profRoomRepo.findAll());
+            if (forbidden != null) {
+                violations.add("Sala " + room.getName() + " e " + forbidden);
+            }
         }
 
         for (ScheduledActivity other : activityRepo.findAll()) {

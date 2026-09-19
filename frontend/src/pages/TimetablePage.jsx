@@ -44,6 +44,8 @@ export default function TimetablePage() {
   const [loadError, setLoadError] = useState(null);
   const [busyPin, setBusyPin] = useState(false);
   const [unplacedFilter, setUnplacedFilter] = useState('');
+  const [roomPickerFor, setRoomPickerFor] = useState(null);
+  const [roomOptions, setRoomOptions] = useState(null);
   const [zoom, setZoom] = useState(1);
 
   const viewportRef = useRef(null);
@@ -196,6 +198,38 @@ export default function TimetablePage() {
     } finally {
       setBusyPin(false);
       setTimeout(() => setToast(null), 8000);
+    }
+  }
+
+  /** Deschide lista de săli pentru o oră deja plasată. */
+  async function openRoomPicker(a) {
+    setRoomPickerFor(a.id);
+    setRoomOptions(null);
+    try {
+      setRoomOptions(await api.roomOptions(a.id));
+    } catch (e) {
+      setRoomOptions([]);
+      setToast({ ok: false, msg: e.message });
+      setTimeout(() => setToast(null), 5000);
+    }
+  }
+
+  /** Schimbă sala unei ore, păstrându-i intervalul. */
+  async function changeRoom(a, roomId) {
+    setRoomPickerFor(null);
+    setBusyPin(true);
+    try {
+      const res = await api.move(a.id, a.timeSlotId, roomId);
+      setToast(res.violations.length === 0
+        ? { ok: true, msg: `„${a.subject}" → sala ${res.activity.room}.` }
+        : { ok: false, msg: `„${a.subject}" → sala ${res.activity.room}, dar: `
+          + res.violations.join('; ') });
+      reload();
+    } catch (e) {
+      setToast({ ok: false, msg: e.message });
+    } finally {
+      setBusyPin(false);
+      setTimeout(() => setToast(null), 7000);
     }
   }
 
@@ -546,7 +580,13 @@ export default function TimetablePage() {
                       <td key={sec.key} className={`grid-cell tt-room${isBlocked ? ' blocked' : ''}`}>
                         {acts.map((a) => (a.online
                           ? <span key={a.id} className="online-tag">ONLINE</span>
-                          : <span key={a.id}>{a.room}</span>))
+                          : (
+                            <RoomPicker key={a.id} act={a} open={roomPickerFor === a.id}
+                                        onOpen={() => openRoomPicker(a)}
+                                        onClose={() => setRoomPickerFor(null)}
+                                        options={roomOptions} busy={busyPin}
+                                        onPick={(roomId) => changeRoom(a, roomId)} />
+                          )))
                           .reduce((out, el) => (out.length ? [...out, ' / ', el] : [el]), [])}
                       </td>
                     );
@@ -620,6 +660,38 @@ export default function TimetablePage() {
       </table>
     );
   }
+}
+
+/**
+ * Sala unei ore, cu lista din care poate fi schimbată. Sălile care nu merg rămân în listă, dar
+ * dezactivate și cu motivul scris — altfel ai căuta degeaba una care oricum n-ar fi acceptată.
+ */
+function RoomPicker({ act, open, onOpen, onClose, options, busy, onPick }) {
+  if (!open) {
+    return (
+      <button type="button" className="room-btn" disabled={busy}
+              title="Schimbă sala" onClick={onOpen}>
+        {act.room || '—'}
+      </button>
+    );
+  }
+  return (
+    <select className="room-select" autoFocus disabled={!options}
+            value={act.room ? String(options?.find((o) => o.name === act.room)?.id ?? '') : ''}
+            onBlur={onClose}
+            onChange={(e) => (e.target.value ? onPick(Number(e.target.value)) : onClose())}>
+      {!options && <option>se încarcă…</option>}
+      {options && options.filter((o) => o.usable).length === 0 && (
+        <option value="">nicio sală liberă în acest interval</option>
+      )}
+      {options && options.filter((o) => o.usable).map((o) => (
+        <option key={o.id} value={o.id}>{o.name} · {o.capacity} locuri</option>
+      ))}
+      {options && options.filter((o) => !o.usable).map((o) => (
+        <option key={o.id} value={o.id} disabled>{o.name} — {o.reason}</option>
+      ))}
+    </select>
+  );
 }
 
 /** Lacătul de pe o oră: fixată, generarea n-o mai mută. */

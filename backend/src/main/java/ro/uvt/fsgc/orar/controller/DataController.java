@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import ro.uvt.fsgc.orar.domain.Professor;
@@ -97,6 +98,13 @@ public class DataController {
     @PostMapping("/schedule/clear")
     public ScheduleService.ClearResult clearSchedule() {
         return scheduleService.clearSchedule();
+    }
+
+    /** The rooms this hour could use at that time, and why the others could not. */
+    @GetMapping("/activities/{id}/rooms")
+    public List<ScheduleService.RoomOption> roomOptions(@PathVariable Long id,
+                                                        @RequestParam(required = false) Long timeSlotId) {
+        return scheduleService.roomOptions(id, timeSlotId);
     }
 
     /** Pin an hour where it stands (or release it) so the next generation builds around it. */

@@ -21,6 +21,7 @@ import ro.uvt.fsgc.orar.domain.StudyProgram;
 import ro.uvt.fsgc.orar.domain.Subject;
 import ro.uvt.fsgc.orar.domain.TimeSlot;
 import ro.uvt.fsgc.orar.domain.WeekParity;
+import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
 import ro.uvt.fsgc.orar.repository.ScheduledActivityRepository;
 import ro.uvt.fsgc.orar.repository.SpecialBlockRuleRepository;
@@ -37,7 +38,8 @@ class PinRulesTest {
     private final RoomRepository roomRepo = mock(RoomRepository.class);
     private final SpecialBlockRuleRepository blockRepo = mock(SpecialBlockRuleRepository.class);
     private final ScheduleService service =
-            new ScheduleService(activityRepo, timeSlotRepo, roomRepo, blockRepo);
+            new ScheduleService(activityRepo, timeSlotRepo, roomRepo, blockRepo,
+                    mock(ProfessorRoomRestrictionRepository.class));
 
     private static final TimeSlot MON1 = new TimeSlot(11L, DayOfWeek.MONDAY, 1,
             LocalTime.of(8, 0), LocalTime.of(9, 30));

@@ -620,3 +620,12 @@ tbody tr:hover td { background: #fbfcfe; }
 }
 .pin:hover { background: transparent; opacity: 1; transform: scale(1.15); }
 .pin.on { opacity: 1; }
+
+/* sala unei ore, schimbabila din grila */
+.room-btn {
+  background: transparent; border: 1px dashed var(--border-strong); box-shadow: none;
+  color: var(--muted); font-size: 11.5px; font-weight: 600;
+  padding: 0 5px; border-radius: 4px; line-height: 1.4;
+}
+.room-btn:hover { background: var(--panel-2); color: var(--text); border-style: solid; }
+.room-select { font-size: 11.5px; padding: 1px 4px; max-width: 220px; }

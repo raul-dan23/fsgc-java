@@ -76,6 +76,10 @@ export const api = {
     }
     return body;
   },
+  /** Sălile pe care ora le poate folosi în intervalul ei, și motivul pentru celelalte. */
+  async roomOptions(activityId) {
+    return (await json(await fetch(`/api/data/activities/${activityId}/rooms`))).body;
+  },
   /** Fixează ora acolo unde e (sau o eliberează), ca generarea să nu o mai mute. */
   async setPinned(activityId, pinned) {
     const res = await fetch(`/api/data/activities/${activityId}/pin`, {
