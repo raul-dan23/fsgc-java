@@ -58,6 +58,13 @@ export default function AdminPage() {
           Modificările se aplică direct în baza de date. După ce schimbi date care afectează orarul
           (grupe, activități, săli), regenerează orarul din <b>Generare</b>.
         </p>
+        {tab === 'professors' && (
+          <p className="muted" style={{ marginBottom: 0, marginTop: 8 }}>
+            Dacă un cadru didactic predă <b>doar online</b>, apasă „Doar online" pe rândul lui:
+            toate orele lui devin online dintr-o dată, nu mai ocupă nicio sală și pot sta în același
+            modul cu ore ale altor grupe. „Înapoi în săli" face invers.
+          </p>
+        )}
         {tab === 'activities' && (
           <p className="muted" style={{ marginBottom: 0, marginTop: 8 }}>
             Bifele <b>Laborator</b> și <b>Online</b> se aplică dintr-un click, fără să intri în
@@ -132,6 +139,30 @@ function buildTabs({ subjects, professors, groups }) {
         department: r.department, hasOwnLaptop: !!r.hasOwnLaptop,
       }),
       label_of: (r) => r.name,
+      actions: [
+        {
+          label: 'Doar online',
+          title: 'Trece toate orele acestui cadru didactic pe online (nu mai ocupă nicio sală)',
+          confirm: (r) => `Treci toate orele lui ${r.name} pe online?\n\n`
+            + 'Nu vor mai ocupa nicio sală, dar rămân în orar și respectă restul regulilor.',
+          run: async (r) => {
+            const res = await api.setProfessorOnline(r.id, true);
+            return res.changed === 0
+              ? `${r.name}: toate cele ${res.total} ore erau deja online.`
+              : `${r.name}: ${res.changed} din ${res.total} ore trecute pe online.`;
+          },
+        },
+        {
+          label: 'Înapoi în săli',
+          title: 'Scoate marcajul online de pe orele acestui cadru didactic',
+          run: async (r) => {
+            const res = await api.setProfessorOnline(r.id, false);
+            return res.changed === 0
+              ? `${r.name}: nicio oră nu era online.`
+              : `${r.name}: ${res.changed} ore nu mai sunt online și vor primi sală.`;
+          },
+        },
+      ],
       columns: [
         { key: 'name', label: 'Nume', type: 'text', width: 200 },
         { key: 'email', label: 'Email', type: 'text', width: 220 },
@@ -314,6 +345,23 @@ function EntityTable({ tab, onChanged }) {
     }
   }
 
+  /** O acțiune declarată de tab pe un rând (ex. „toate orele online"). */
+  async function runAction(action, row) {
+    if (action.confirm && !window.confirm(action.confirm(row))) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setNotice(await action.run(row));
+      reload();
+      onChanged();
+      setTimeout(() => setNotice(null), 6000);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function remove(row) {
     if (!window.confirm(`Ștergi „${tab.label_of(row)}”? Acțiunea nu poate fi anulată.`)) return;
     setBusy(true);
@@ -419,8 +467,14 @@ function EntityTable({ tab, onChanged }) {
                       ) : display(row, c)}
                     </td>
                   ))}
-                  <td>
+                  <td style={{ whiteSpace: 'nowrap' }}>
                     <button className="ghost" onClick={() => startEdit(row)} disabled={busy}>Editează</button>{' '}
+                    {(tab.actions || []).map((act) => (
+                      <span key={act.label}>
+                        <button className="ghost" title={act.title} disabled={busy}
+                                onClick={() => runAction(act, row)}>{act.label}</button>{' '}
+                      </span>
+                    ))}
                     <button className="danger" onClick={() => remove(row)} disabled={busy}>Șterge</button>
                   </td>
                 </tr>

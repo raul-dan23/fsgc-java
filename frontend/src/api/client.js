@@ -125,6 +125,19 @@ export const api = {
     });
     return (await json(res)).body;
   },
+  /** Trece toate orele unui cadru didactic pe online (sau le aduce înapoi în săli). */
+  async setProfessorOnline(professorId, online) {
+    const res = await fetch(`/api/admin/professors/${professorId}/online`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ online }),
+    });
+    const { ok, body } = await json(res);
+    if (!ok) {
+      throw new Error((body && body.message) || 'Operația a eșuat.');
+    }
+    return body;
+  },
   async adminDelete(kind, id) {
     await json(await fetch(`/api/admin/${kind}/${id}`, { method: 'DELETE' }));
   },

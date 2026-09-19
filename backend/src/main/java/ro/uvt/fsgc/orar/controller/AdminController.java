@@ -130,6 +130,40 @@ public class AdminController {
         return professorRepo.save(p);
     }
 
+    /** How many of a professor's hours the switch touched, and how many they have in total. */
+    public record BulkOnlineResult(int changed, int total, boolean online) {
+    }
+
+    /**
+     * Marks every hour of one professor online, or brings them all back into rooms. A professor who
+     * only ever teaches online would otherwise mean ticking the box once per hour, and forgetting
+     * one leaves a room booked for a class nobody attends.
+     */
+    @PutMapping("/professors/{id}/online")
+    @Transactional
+    public BulkOnlineResult setProfessorOnline(@PathVariable Long id,
+                                               @RequestBody Map<String, Boolean> body) {
+        Professor p = professorRepo.findById(id)
+                .orElseThrow(() -> new ConflictException("Profesorul nu există (id " + id + ")"));
+        boolean online = Boolean.TRUE.equals(body.get("online"));
+        List<ScheduledActivity> mine = activityRepo.findAll().stream()
+                .filter(a -> a.getProfessor() != null && a.getProfessor().getId().equals(p.getId()))
+                .toList();
+        int changed = 0;
+        for (ScheduledActivity a : mine) {
+            if (a.isOnline() == online) {
+                continue;
+            }
+            a.setOnline(online);
+            if (online) {
+                a.setRoom(null); // an online hour holds no room
+            }
+            activityRepo.save(a);
+            changed++;
+        }
+        return new BulkOnlineResult(changed, mine.size(), online);
+    }
+
     @DeleteMapping("/professors/{id}")
     @Transactional
     public ResponseEntity<Void> deleteProfessor(@PathVariable Long id) {
