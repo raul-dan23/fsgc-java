@@ -128,12 +128,13 @@ export default function ConstraintsPage() {
         title="Zile blocate pentru ani terminali"
         hint="Într-o zi blocată nu se programează nimic pentru programul și anul selectat."
         kind="blocked-days"
+        multi="dayOfWeek"
         fields={[
           { name: 'studyProgram', label: 'Program de studiu', type: 'select',
             options: Object.keys(PROGRAM_RO), labels: PROGRAM_RO, required: true },
           { name: 'year', label: 'An', type: 'select', options: years,
             labels: Object.fromEntries(years.map((y) => [y, `Anul ${y}`])), number: true, required: true },
-          { name: 'dayOfWeek', label: 'Ziua', type: 'select', options: DAYS, labels: DAY_RO, required: true },
+          { name: 'dayOfWeek', label: 'Zilele', type: 'days', options: DAYS, labels: DAY_RO, required: true },
           { name: 'semester', label: 'Semestrul', type: 'select', options: ['1', '2'],
             labels: { 1: 'Semestrul I', 2: 'Semestrul al II-lea' } },
           { name: 'academicYear', label: 'An universitar', type: 'text', placeholder: '2025-2026' },
@@ -153,9 +154,10 @@ export default function ConstraintsPage() {
         title="Indisponibilități cadre didactice"
         hint="Intervalul în care profesorul nu poate preda. Lasă orele goale pentru a bloca toată ziua."
         kind="professor-unavailabilities"
+        multi="dayOfWeek"
         fields={[
           { name: 'professorId', label: 'Cadrul didactic', type: 'entity', options: professors, required: true },
-          { name: 'dayOfWeek', label: 'Ziua', type: 'select', options: DAYS, labels: DAY_RO, required: true },
+          { name: 'dayOfWeek', label: 'Zilele', type: 'days', options: DAYS, labels: DAY_RO, required: true },
           { name: 'startTime', label: 'De la ora', type: 'time' },
           { name: 'endTime', label: 'Până la ora', type: 'time' },
         ]}
@@ -175,9 +177,10 @@ export default function ConstraintsPage() {
         title="Indisponibilități săli"
         hint="Sălile sunt considerate disponibile la toate modulele. Adaugă aici doar excepțiile — intervalele în care sala NU poate fi folosită."
         kind="room-unavailabilities"
+        multi="dayOfWeek"
         fields={[
           { name: 'roomId', label: 'Sala', type: 'entity', options: rooms, required: true },
-          { name: 'dayOfWeek', label: 'Ziua', type: 'select', options: DAYS, labels: DAY_RO, required: true },
+          { name: 'dayOfWeek', label: 'Zilele', type: 'days', options: DAYS, labels: DAY_RO, required: true },
           { name: 'startTime', label: 'De la ora', type: 'time', required: true },
           { name: 'endTime', label: 'Până la ora', type: 'time', required: true },
           { name: 'reason', label: 'Motiv (opțional)', type: 'text', placeholder: 'ex. renovare' },
@@ -524,10 +527,16 @@ function SpecialBlocksSection({ groups, slots, modules }) {
  * own control; `transform` reshapes the form into the API body when the two differ (e.g. day +
  * module become a single timeSlotId).
  */
-function RuleSection({ title, hint, kind, fields, columns, transform }) {
+/**
+ * @param multi numele câmpului care poate ține mai multe valori (zilele): se trimite câte o
+ *              regulă pentru fiecare valoare bifată, altfel „marți și joi" ar cere două treceri
+ *              prin formular pentru aceeași regulă.
+ */
+function RuleSection({ title, hint, kind, fields, columns, transform, multi }) {
   const [items, setItems] = useState(null);
   const [form, setForm] = useState({});
   const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(() => {
@@ -541,19 +550,27 @@ function RuleSection({ title, hint, kind, fields, columns, transform }) {
   const visible = fields.filter((f) => !f.showIf || f.showIf(form));
 
   async function add() {
-    const missing = visible
-      .filter((f) => f.required)
-      .filter((f) => form[f.name] === undefined || form[f.name] === '' || form[f.name] === null)
-      .map((f) => f.label);
+    const empty = (v) => v === undefined || v === '' || v === null
+      || (Array.isArray(v) && v.length === 0);
+    const missing = visible.filter((f) => f.required && empty(form[f.name])).map((f) => f.label);
     if (missing.length) {
       setError('Completează: ' + missing.join(', '));
       return;
     }
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      await api.addRule(kind, transform ? transform(form) : form);
+      const body = transform ? transform(form) : form;
+      const values = multi ? [].concat(form[multi]) : [null];
+      for (const v of values) {
+        await api.addRule(kind, multi ? { ...body, [multi]: v } : body);
+      }
       setForm({});
+      if (values.length > 1) {
+        setNotice(`S-au adăugat ${values.length} reguli, câte una pentru fiecare zi bifată.`);
+        setTimeout(() => setNotice(null), 5000);
+      }
       reload();
     } catch (e) {
       setError('Nu s-a putut adăuga: ' + e.message);
@@ -590,6 +607,7 @@ function RuleSection({ title, hint, kind, fields, columns, transform }) {
       </div>
 
       {error && <p className="badge bad" style={{ display: 'inline-block', marginTop: 10 }}>{error}</p>}
+      {notice && <p className="badge ok" style={{ display: 'inline-block', marginTop: 10 }}>{notice}</p>}
 
       {items === null ? (
         <p className="muted" style={{ marginTop: 12 }}>Se încarcă…</p>
@@ -624,6 +642,27 @@ function RuleSection({ title, hint, kind, fields, columns, transform }) {
 function Control({ field, form, setForm }) {
   const set = (v) => setForm({ ...form, [field.name]: v });
   const value = form[field.name] === undefined || form[field.name] === null ? '' : form[field.name];
+
+  // Mai multe zile deodată: aceeași regulă e rareori pentru o singură zi.
+  if (field.type === 'days') {
+    const picked = Array.isArray(form[field.name]) ? form[field.name] : [];
+    const toggle = (d) => set(picked.includes(d) ? picked.filter((x) => x !== d) : [...picked, d]);
+    const all = picked.length === field.options.length;
+    return (
+      <div className="chips" style={{ paddingTop: 4 }}>
+        {field.options.map((d) => (
+          <button key={d} type="button" className={`chip${picked.includes(d) ? ' on' : ''}`}
+                  onClick={() => toggle(d)}>
+            {field.labels ? field.labels[d] : d}
+          </button>
+        ))}
+        <button type="button" className="chip" style={{ fontStyle: 'italic' }}
+                onClick={() => set(all ? [] : [...field.options])}>
+          {all ? 'niciuna' : 'toate'}
+        </button>
+      </div>
+    );
+  }
 
   if (field.type === 'select') {
     return (
