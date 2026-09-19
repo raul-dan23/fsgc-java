@@ -43,6 +43,7 @@ export default function TimetablePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [busyPin, setBusyPin] = useState(false);
+  const [unplacedFilter, setUnplacedFilter] = useState('');
   const [zoom, setZoom] = useState(1);
 
   const viewportRef = useRef(null);
@@ -146,8 +147,50 @@ export default function TimetablePage() {
   }, [slots]);
 
   const unplaced = schedule.filter((a) => !a.assigned);
+  const shownUnplaced = useMemo(() => {
+    const needle = unplacedFilter.trim().toLowerCase();
+    const list = unplaced.slice().sort((x, y) => x.subject.localeCompare(y.subject));
+    if (!needle) return list;
+    return list.filter((a) => [a.subject, a.subjectCode, a.professor, ...(a.groups || [])]
+      .filter(Boolean).join(' ').toLowerCase().includes(needle));
+  }, [schedule, unplacedFilter]);
   const pinnedActs = schedule.filter((a) => a.pinned && a.assigned)
     .sort((x, y) => WEEK.indexOf(x.day) - WEEK.indexOf(y.day) || x.slotIndex - y.slotIndex);
+
+  /**
+   * Golește grila ca să poți construi orarul de la zero, punând întâi orele care au un singur
+   * interval posibil. Înainte salvează un instantaneu, deci orarul de acum se poate recupera
+   * oricând din „Orare salvate" — golirea nu pierde nimic și nu atinge regulile.
+   */
+  async function clearSchedule() {
+    const placed = schedule.filter((a) => a.assigned).length;
+    if (placed === 0) {
+      setToast({ ok: false, msg: 'Orarul e deja gol.' });
+      setTimeout(() => setToast(null), 4000);
+      return;
+    }
+    const ok = window.confirm(
+      `Golești orarul?\n\nCele ${placed} ore ies din grilă și rămân de plasat.\n`
+      + 'Se păstrează: activitățile, regulile din Constrângeri, ponderile, sălile și datele.\n\n'
+      + 'Înainte de golire se salvează automat un instantaneu, ca să poți reveni din '
+      + '„Orare salvate".');
+    if (!ok) return;
+    setBusyPin(true);
+    try {
+      const when = new Date().toLocaleString('ro-RO');
+      await api.saveTimetable({ name: `Înainte de golire — ${when}`,
+        note: 'Instantaneu automat, făcut la golirea orarului.' });
+      const res = await api.clearSchedule();
+      await reload();
+      setToast({ ok: true, msg: `Orar golit: ${res.cleared} ore au ieșit din grilă. `
+        + 'Instantaneul de dinainte e în „Orare salvate".' });
+    } catch (e) {
+      setToast({ ok: false, msg: e.message });
+    } finally {
+      setBusyPin(false);
+      setTimeout(() => setToast(null), 8000);
+    }
+  }
 
   /** Fixează / eliberează o oră. Fixată, generarea o lasă exact acolo unde e. */
   async function togglePin(a) {
@@ -300,6 +343,7 @@ export default function TimetablePage() {
           <span className="grow" />
           <a href={api.exportUrl}><button className="secondary">Export Excel</button></a>
           <button className="secondary" onClick={reload}>Reîncarcă</button>
+          <button className="danger" onClick={clearSchedule} disabled={busyPin}>Golește orarul</button>
         </div>
 
         <div className="legend" style={{ marginTop: 14 }}>
@@ -339,9 +383,26 @@ export default function TimetablePage() {
 
       {unplaced.length > 0 && (
         <div className="panel">
-          <h2>Neplasate ({unplaced.length})</h2>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {unplaced.map((a) => (
+          <h2>De plasat ({unplaced.length})</h2>
+          <p className="muted" style={{ marginTop: -6 }}>
+            Trage o oră de aici în grilă. Caută după materie, cadru didactic sau grupă — cu orarul
+            gol, lista are toate orele semestrului.
+          </p>
+          <div className="row" style={{ marginBottom: 10 }}>
+            <div className="field">
+              <label>Caută ora</label>
+              <input value={unplacedFilter} style={{ width: 280 }}
+                     placeholder="ex. Deontologie, Popescu, MD II_gr.1"
+                     onChange={(e) => setUnplacedFilter(e.target.value)} />
+            </div>
+            {unplacedFilter && (
+              <button className="ghost" onClick={() => setUnplacedFilter('')}>golește căutarea</button>
+            )}
+            <span className="grow" />
+            <span className="muted">{shownUnplaced.length} din {unplaced.length} afișate</span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+            {shownUnplaced.map((a) => (
               <div key={a.id} className="cell-act violation" draggable
                    onDragStart={() => setDragId(a.id)}>
                 <div className="t">

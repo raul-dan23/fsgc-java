@@ -67,6 +67,33 @@ public class ScheduleService {
         return new MoveResult(ActivityMapper.toView(activity), validate(activity));
     }
 
+    /** How much was cleared, so the UI can say it plainly. */
+    public record ClearResult(int cleared, int total) {
+    }
+
+    /**
+     * Takes every hour off the grid so the timetable can be built again from nothing. Only the
+     * placement goes: the activities themselves stay, and so do the rules, the weights, the rooms
+     * and their unavailabilities — clearing is a fresh start for the puzzle, not for the data.
+     * Pins go too, since an hour with no place cannot stay fixed to one.
+     */
+    @Transactional
+    public ClearResult clearSchedule() {
+        List<ScheduledActivity> all = activityRepo.findAll();
+        int cleared = 0;
+        for (ScheduledActivity a : all) {
+            if (a.getTimeSlot() == null && a.getRoom() == null && !a.isPinned()) {
+                continue;
+            }
+            a.setTimeSlot(null);
+            a.setRoom(null);
+            a.setPinned(false);
+            cleared++;
+        }
+        activityRepo.saveAll(all);
+        return new ClearResult(cleared, all.size());
+    }
+
     /**
      * Fixes an activity where it stands, or releases it. Only an hour that already has a slot and
      * a room can be pinned: pinning an unplaced one would tell the solver to leave it unplaced

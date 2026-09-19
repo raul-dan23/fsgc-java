@@ -67,6 +67,15 @@ export const api = {
   async professors() {
     return (await json(await fetch('/api/data/professors'))).body;
   },
+  /** Scoate toate orele din grilă. Regulile, ponderile și datele rămân neatinse. */
+  async clearSchedule() {
+    const res = await fetch('/api/data/schedule/clear', { method: 'POST' });
+    const { ok, body } = await json(res);
+    if (!ok) {
+      throw new Error((body && body.message) || 'Golirea a eșuat.');
+    }
+    return body;
+  },
   /** Fixează ora acolo unde e (sau o eliberează), ca generarea să nu o mai mute. */
   async setPinned(activityId, pinned) {
     const res = await fetch(`/api/data/activities/${activityId}/pin`, {

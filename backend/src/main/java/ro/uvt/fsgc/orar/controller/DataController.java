@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -87,6 +88,15 @@ public class DataController {
         Long timeSlotId = body.get("timeSlotId");
         Long roomId = body.get("roomId");
         return ResponseEntity.ok(scheduleService.move(id, timeSlotId, roomId));
+    }
+
+    /**
+     * Empties the grid: every hour goes back to "unplaced", the rules and everything else stay.
+     * The caller is expected to have snapshotted first — the UI does, so nothing is ever lost.
+     */
+    @PostMapping("/schedule/clear")
+    public ScheduleService.ClearResult clearSchedule() {
+        return scheduleService.clearSchedule();
     }
 
     /** Pin an hour where it stands (or release it) so the next generation builds around it. */
