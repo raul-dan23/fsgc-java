@@ -97,23 +97,30 @@ export default function TimetablePage() {
     return m;
   }, [rooms]);
 
-  // distinct column keys for the room/professor views
+  /**
+   * Coloanele pentru vizualizările pe sală / cadru didactic. Se construiesc din TOATE orele, nu
+   * doar din cele plasate: cu orarul gol nu ar mai fi nicio coloană, deci n-ai avea unde trage
+   * prima oră. La sală intră și sălile care încă n-au nimic în ele.
+   */
   const columns = useMemo(() => {
     const set = new Set();
-    schedule.forEach((a) => {
-      if (!a.assigned) return;
-      keysFor(a, view).forEach((k) => set.add(k));
-    });
-    let cols = [...set].sort();
+    schedule.forEach((a) => keysFor(a, view).forEach((k) => set.add(k)));
+    if (view === 'room') {
+      rooms.forEach((r) => set.add(r.name));
+      set.delete('—');
+    }
+    let cols = [...set].filter(Boolean).sort();
     if (filter) cols = cols.filter((c) => c.toLowerCase().includes(filter.toLowerCase()));
     return cols;
-  }, [schedule, view, filter]);
+  }, [schedule, rooms, view, filter]);
 
-  // FSGC columns: distinct sections (program/year/specialization), sorted, grouped by an de studiu
+  /**
+   * Coloanele FSGC: secțiile (program/an/specializare), din TOATE orele semestrului, nu doar din
+   * cele plasate. Altfel un orar gol nu avea nicio coloană și nu se putea pune prima oră în el.
+   */
   const sections = useMemo(() => {
     const map = new Map();
     schedule.forEach((a) => {
-      if (!a.assigned) return;
       (a.sections || []).forEach((sec) => {
         const key = `${sec.program}|${sec.year}|${sec.specialization}`;
         if (!map.has(key)) map.set(key, { ...sec, key });
@@ -438,10 +445,15 @@ export default function TimetablePage() {
               : renderGeneric()}
           </div>
         </div>
-        {!loading && view === 'group' && sections.length === 0 && schedule.some((a) => a.assigned) && (
+        {!loading && view === 'group' && sections.length === 0 && schedule.length > 0 && (
           <p className="hint">
             Format FSGC indisponibil (lipsesc datele de secție/an din API). Reconstruiește și repornește
             backend-ul ca să apară coloanele pe specializare-an; momentan se afișează grila simplă.
+          </p>
+        )}
+        {!loading && schedule.length === 0 && (
+          <p className="hint">
+            Nu există activități. Importă datele semestrului din pagina <b>Import</b>.
           </p>
         )}
       </div>
