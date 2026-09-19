@@ -43,6 +43,13 @@ const WEIGHT_FIELDS = [
     'Mare: solverul lasă un modul liber între ele sau ține ambele ore în P01. Mic: poate programa drumul imposibil.'],
 ];
 
+/** "08:00:00" -> 480, pentru sortarea intervalelor unei zile. */
+const minutesOf = (t) => {
+  if (!t) return -1;
+  const [h, m] = String(t).split(':');
+  return Number(h) * 60 + Number(m);
+};
+
 /** "08:00:00" -> "08:00" */
 const hhmm = (t) => (t ? String(t).slice(0, 5) : '');
 
@@ -171,6 +178,14 @@ export default function ConstraintsPage() {
               : 'Toată ziua'),
           },
         ]}
+        group={{
+          header: 'Cadru didactic',
+          by: (r) => (r.professor ? r.professor.id : 0),
+          label: (r) => (r.professor ? r.professor.name : '— fără cadru didactic —'),
+          chip: (r) => `${DAY_RO[r.dayOfWeek] || r.dayOfWeek} ${r.startTime
+            ? `${hhmm(r.startTime)}–${hhmm(r.endTime) || '…'}` : 'toată ziua'}`,
+          rank: (r) => DAYS.indexOf(r.dayOfWeek) * 10000 + minutesOf(r.startTime),
+        }}
       />
 
       <RuleSection
@@ -191,6 +206,14 @@ export default function ConstraintsPage() {
           { label: 'Interval blocat', render: (r) => `${hhmm(r.startTime)} – ${hhmm(r.endTime)}` },
           { label: 'Motiv', render: (r) => r.reason || '—' },
         ]}
+        group={{
+          header: 'Sala',
+          by: (r) => r.roomName || '—',
+          label: (r) => r.roomName || '—',
+          chip: (r) => `${DAY_RO[r.dayOfWeek] || r.dayOfWeek} ${hhmm(r.startTime)}–${hhmm(r.endTime)}`
+            + (r.reason ? ` (${r.reason})` : ''),
+          rank: (r) => DAYS.indexOf(r.dayOfWeek) * 10000 + minutesOf(r.startTime),
+        }}
       />
     </div>
   );
@@ -531,8 +554,11 @@ function SpecialBlocksSection({ groups, slots, modules }) {
  * @param multi numele câmpului care poate ține mai multe valori (zilele): se trimite câte o
  *              regulă pentru fiecare valoare bifată, altfel „marți și joi" ar cere două treceri
  *              prin formular pentru aceeași regulă.
+ * @param group strânge regulile care privesc același lucru (un cadru didactic, o sală) într-un
+ *              singur rând, cu câte un chip per interval: 30 de profesori × 5 zile ar face 150
+ *              de rânduri prin care nu mai găsești nimic. {header, by, label, chip, rank}
  */
-function RuleSection({ title, hint, kind, fields, columns, transform, multi }) {
+function RuleSection({ title, hint, kind, fields, columns, transform, multi, group }) {
   const [items, setItems] = useState(null);
   const [form, setForm] = useState({});
   const [error, setError] = useState(null);
@@ -579,10 +605,12 @@ function RuleSection({ title, hint, kind, fields, columns, transform, multi }) {
     }
   }
 
-  async function del(id) {
+  async function del(...ids) {
     setBusy(true);
     try {
-      await api.deleteRule(kind, id);
+      for (const id of ids) {
+        await api.deleteRule(kind, id);
+      }
       reload();
     } catch (e) {
       setError(e.message);
@@ -590,6 +618,20 @@ function RuleSection({ title, hint, kind, fields, columns, transform, multi }) {
       setBusy(false);
     }
   }
+
+  /** Regulile strânse pe subiectul lor, în ordinea în care se citesc. */
+  const grouped = useMemo(() => {
+    if (!group || !items) return [];
+    const map = new Map();
+    items.forEach((r) => {
+      const key = String(group.by(r));
+      if (!map.has(key)) map.set(key, { key, label: group.label(r), rules: [] });
+      map.get(key).rules.push(r);
+    });
+    return [...map.values()]
+      .map((g) => ({ ...g, rules: g.rules.slice().sort((a, b) => group.rank(a) - group.rank(b)) }))
+      .sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  }, [items, group]);
 
   return (
     <div className="panel">
@@ -618,12 +660,38 @@ function RuleSection({ title, hint, kind, fields, columns, transform, multi }) {
           <table>
             <thead>
               <tr>
-                {columns.map((c) => <th key={c.label}>{c.label}</th>)}
-                <th style={{ width: 90 }}>Acțiuni</th>
+                {group ? (
+                  <>
+                    <th style={{ width: 240 }}>{group.header}</th>
+                    <th>Intervale</th>
+                  </>
+                ) : columns.map((c) => <th key={c.label}>{c.label}</th>)}
+                <th style={{ width: 110 }}>Acțiuni</th>
               </tr>
             </thead>
             <tbody>
-              {items.map((it) => (
+              {group ? grouped.map((g) => (
+                <tr key={g.key}>
+                  <td>{g.label}</td>
+                  <td>
+                    <div className="chips">
+                      {g.rules.map((r) => (
+                        <button key={r.id} type="button" className="chip on" disabled={busy}
+                                title="Click pentru a șterge acest interval"
+                                onClick={() => del(r.id)}>
+                          {group.chip(r)}<span className="x">×</span>
+                        </button>
+                      ))}
+                    </div>
+                  </td>
+                  <td>
+                    <button className="danger" disabled={busy}
+                            onClick={() => del(...g.rules.map((r) => r.id))}>
+                      Șterge tot
+                    </button>
+                  </td>
+                </tr>
+              )) : items.map((it) => (
                 <tr key={it.id}>
                   {columns.map((c) => <td key={c.label}>{c.render(it)}</td>)}
                   <td>
