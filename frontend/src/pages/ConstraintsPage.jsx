@@ -47,6 +47,12 @@ const WEIGHT_FIELDS = [
     'Mare: solverul lasă un modul liber între ele sau ține ambele ore în P01. Mic: poate programa drumul imposibil.'],
 ];
 
+/** „M3" când intervalul e fix un modul, altfel orele ca atare (reguli mai vechi). */
+const moduleLabel = (modules, r) => {
+  const hit = modules.find((m) => m.start === hhmm(r.startTime) && m.end === hhmm(r.endTime));
+  return hit ? `M${hit.value}` : `${hhmm(r.startTime)}–${hhmm(r.endTime)}`;
+};
+
 /** "08:00:00" -> 480, pentru sortarea intervalelor unei zile. */
 const minutesOf = (t) => {
   if (!t) return -1;
@@ -218,16 +224,27 @@ export default function ConstraintsPage() {
 
       <RuleSection
         title="Indisponibilități săli"
-        hint="Sălile sunt considerate disponibile la toate modulele. Adaugă aici doar excepțiile — intervalele în care sala NU poate fi folosită."
+        hint="Sălile sunt considerate disponibile la toate modulele. Adaugă aici doar excepțiile — modulele în care sala NU poate fi folosită. Bifează câte zile și câte module vrei: se creează câte o regulă pentru fiecare combinație."
         kind="room-unavailabilities"
-        multi="dayOfWeek"
+        multi={['dayOfWeek', 'slotIndex']}
         fields={[
           { name: 'roomId', label: 'Sala', type: 'entity', options: rooms, required: true },
           { name: 'dayOfWeek', label: 'Zilele', type: 'days', options: DAYS, labels: DAY_RO, required: true },
-          { name: 'startTime', label: 'De la ora', type: 'time', required: true },
-          { name: 'endTime', label: 'Până la ora', type: 'time', required: true },
+          { name: 'slotIndex', label: 'Modulele', type: 'days', options: modules.map((m) => m.value),
+            labels: Object.fromEntries(modules.map((m) => [m.value, `M${m.value} · ${m.range}`])),
+            required: true },
           { name: 'reason', label: 'Motiv (opțional)', type: 'text', placeholder: 'ex. renovare' },
         ]}
+        transform={(f) => {
+          const m = modules.find((x) => x.value === Number(f.slotIndex));
+          return {
+            roomId: f.roomId,
+            dayOfWeek: f.dayOfWeek,
+            startTime: m ? m.start : f.startTime,
+            endTime: m ? m.end : f.endTime,
+            reason: f.reason,
+          };
+        }}
         columns={[
           { label: 'Sala', render: (r) => r.roomName || '—' },
           { label: 'Ziua', render: (r) => DAY_RO[r.dayOfWeek] || r.dayOfWeek },
@@ -238,7 +255,7 @@ export default function ConstraintsPage() {
           header: 'Sala',
           by: (r) => r.roomName || '—',
           label: (r) => r.roomName || '—',
-          chip: (r) => `${DAY_RO[r.dayOfWeek] || r.dayOfWeek} ${hhmm(r.startTime)}–${hhmm(r.endTime)}`
+          chip: (r) => `${DAY_RO[r.dayOfWeek] || r.dayOfWeek} ${moduleLabel(modules, r)}`
             + (r.reason ? ` (${r.reason})` : ''),
           rank: (r) => DAYS.indexOf(r.dayOfWeek) * 10000 + minutesOf(r.startTime),
         }}
@@ -579,9 +596,9 @@ function SpecialBlocksSection({ groups, slots, modules }) {
  * module become a single timeSlotId).
  */
 /**
- * @param multi numele câmpului care poate ține mai multe valori (zilele): se trimite câte o
- *              regulă pentru fiecare valoare bifată, altfel „marți și joi" ar cere două treceri
- *              prin formular pentru aceeași regulă.
+ * @param multi câmpul (sau câmpurile) care pot ține mai multe valori — zilele, modulele. Se
+ *              trimite câte o regulă pentru fiecare combinație bifată, altfel „marți și joi,
+ *              modulele 3 și 4" ar cere patru treceri prin formular pentru aceeași regulă.
  * @param group strânge regulile care privesc același lucru (un cadru didactic, o sală) într-un
  *              singur rând, cu câte un chip per interval: 30 de profesori × 5 zile ar face 150
  *              de rânduri prin care nu mai găsești nimic. {header, by, label, chip, rank}
@@ -615,14 +632,17 @@ function RuleSection({ title, hint, kind, fields, columns, transform, multi, gro
     setError(null);
     setNotice(null);
     try {
-      const body = transform ? transform(form) : form;
-      const values = multi ? [].concat(form[multi]) : [null];
-      for (const v of values) {
-        await api.addRule(kind, multi ? { ...body, [multi]: v } : body);
+      // fiecare combinație bifată (zile × module) devine o regulă
+      const names = multi ? [].concat(multi) : [];
+      const combos = names.reduce((acc, name) => acc.flatMap(
+        (c) => [].concat(form[name]).map((v) => ({ ...c, [name]: v }))), [{}]);
+      for (const combo of combos) {
+        const merged = { ...form, ...combo };
+        await api.addRule(kind, transform ? transform(merged) : merged);
       }
       setForm({});
-      if (values.length > 1) {
-        setNotice(`S-au adăugat ${values.length} reguli, câte una pentru fiecare zi bifată.`);
+      if (combos.length > 1) {
+        setNotice(`S-au adăugat ${combos.length} reguli, câte una pentru fiecare combinație bifată.`);
         setTimeout(() => setNotice(null), 5000);
       }
       reload();
