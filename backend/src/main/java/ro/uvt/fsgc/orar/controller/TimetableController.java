@@ -33,6 +33,12 @@ public class TimetableController {
     }
 
     /** Suggested time budget for the data currently loaded, with the reasoning behind it. */
+    /** What each rule is costing in the timetable as it stands — the bill behind the weights. */
+    @GetMapping("/cost")
+    public List<SolverService.CostLine> cost() {
+        return solverService.currentCost();
+    }
+
     @GetMapping("/suggested-budget")
     public BudgetAdvice suggestedBudget() {
         return advisor.suggestBudget();

@@ -346,11 +346,24 @@ public class TimetableConstraintProvider implements ConstraintProvider {
                 .asConstraint(COMPACTNESS);
     }
 
-    /** S5. Faculty-wide weekly balance: discourage piling activities on a few days (sum of squares). */
+    /**
+     * S5. Faculty-wide weekly balance: discourage piling the whole faculty onto a few days.
+     *
+     * <p>Counts how far a day is from an even share, not the square of its load. The square was
+     * the bug behind a timetable nobody liked: 238 hours over five days scored about 11,000 units
+     * before any weight, so at weight 100 this one constraint was 79% of the whole soft score and
+     * every other preference — gaps in a student's day above all — was noise beside it. Worse, the
+     * number barely moves between a good timetable and a bad one, so most of that mass was a
+     * constant the solver could not act on, while its gradient pushed hours apart across the week,
+     * which is exactly what opens gaps.
+     */
     Constraint globalWeeklyBalance(ConstraintFactory f) {
         return placed(f)
                 .groupBy(a -> a.getTimeSlot().getDayOfWeek(), ConstraintCollectors.count())
-                .penalizeConfigurable((day, count) -> count * count)
+                .join(placed(f).groupBy(ConstraintCollectors.count()),
+                        Joiners.filtering((day, count, total) -> true))
+                .penalizeConfigurable((day, count, total) ->
+                        Math.abs(count - Math.round((float) total / WEEKDAYS)))
                 .asConstraint(GLOBAL_WEEKLY_BALANCE);
     }
 
@@ -443,6 +456,9 @@ public class TimetableConstraintProvider implements ConstraintProvider {
 
     /** At most five modules in a day for one group, courses and seminars together. */
     public static final int MAX_MODULES_A_DAY = 5;
+
+    /** Monday to Friday: the timetable has no weekend. */
+    static final int WEEKDAYS = 5;
 
     /** Days a week a professor should have to come in; beyond this it only costs soft points. */
     public static final int MAX_PROFESSOR_DAYS = 3;

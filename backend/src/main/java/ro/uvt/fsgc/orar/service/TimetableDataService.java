@@ -59,15 +59,7 @@ public class TimetableDataService {
 
     @Transactional(readOnly = true)
     public TimetableSolution loadProblem() {
-        TimetableSolution s = new TimetableSolution();
-        s.setTimeSlots(timeSlotRepo.findAll());
-        s.setRooms(roomRepo.findAll());
-        s.setStudentGroups(groupRepo.findAll());
-        s.setActivities(activityRepo.findAll());
-        s.setBlockedDayRules(blockedDayRepo.findAll());
-        s.setSpecialBlockRules(specialBlockRepo.findAll());
-        s.setProfessorUnavailabilities(profUnavailRepo.findAll());
-        s.setProfessorRoomRestrictions(profRoomRepo.findAll());
+        TimetableSolution s = loadFacts();
 
         // Touch lazy collections and clear any previous assignment so the solver starts fresh —
         // except for the hours someone pinned, which keep theirs and anchor the rest of the solve.
@@ -82,11 +74,38 @@ public class TimetableDataService {
             a.setTimeSlot(null);
             a.setRoom(null);
         });
+
+        s.setConstraintConfiguration(buildWeights());
+        return s;
+    }
+
+    /** Everything the constraints join on, in one persistence context. */
+    private TimetableSolution loadFacts() {
+        TimetableSolution s = new TimetableSolution();
+        s.setTimeSlots(timeSlotRepo.findAll());
+        s.setRooms(roomRepo.findAll());
+        s.setStudentGroups(groupRepo.findAll());
+        s.setActivities(activityRepo.findAll());
+        s.setBlockedDayRules(blockedDayRepo.findAll());
+        s.setSpecialBlockRules(specialBlockRepo.findAll());
+        s.setProfessorUnavailabilities(profUnavailRepo.findAll());
+        s.setProfessorRoomRestrictions(profRoomRepo.findAll());
         s.getRooms().forEach(r -> {
             r.getUnavailabilities().size();
             r.getEquipment().size();
         });
+        return s;
+    }
 
+    /**
+     * The timetable exactly as it stands, ready to be scored. Same facts as {@link #loadProblem()},
+     * but it keeps every placement instead of clearing it — this is not a problem to solve, it is
+     * a solution to measure.
+     */
+    @Transactional(readOnly = true)
+    public TimetableSolution loadCurrent() {
+        TimetableSolution s = loadFacts();
+        s.getActivities().forEach(a -> a.getStudentGroups().size());
         s.setConstraintConfiguration(buildWeights());
         return s;
     }

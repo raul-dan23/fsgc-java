@@ -44,6 +44,12 @@ public class GenerationAdvisor {
     /** Monday to Friday: the timetable has no weekend. */
     private static final int WEEKDAYS = 5;
 
+    private static final Map<java.time.DayOfWeek, String> DAY_RO = Map.of(
+            java.time.DayOfWeek.MONDAY, "luni", java.time.DayOfWeek.TUESDAY, "marți",
+            java.time.DayOfWeek.WEDNESDAY, "miercuri", java.time.DayOfWeek.THURSDAY, "joi",
+            java.time.DayOfWeek.FRIDAY, "vineri", java.time.DayOfWeek.SATURDAY, "sâmbătă",
+            java.time.DayOfWeek.SUNDAY, "duminică");
+
     private static final int[] LADDER = {30, 60, 90, 120, 180, 300, 600, 900};
 
     private final ScheduledActivityRepository activityRepo;
@@ -177,6 +183,7 @@ public class GenerationAdvisor {
 
         List<String> blockers = structuralBlockers(activities, rooms, nS, eveningSlots, amphiRooms);
         blockers.addAll(pinnedClashes(activities));
+        blockers.addAll(pinnedOnBrokenSpots(activities));
 
         String summary;
         if (!blockers.isEmpty()) {
@@ -194,6 +201,48 @@ public class GenerationAdvisor {
 
         return new BudgetAdvice(quick, recommended, thorough, summary, reasons, blockers,
                 nA, nR, nS, (int) Math.round(occupancy * 100));
+    }
+
+    /**
+     * Hours pinned onto a place that breaks a rule on its own — inside a reserved interval, on a
+     * blocked day, a master hour outside the evening. The solver cannot move them, so it carries
+     * the violation to the end and the timetable can never reach zero hard, however long it runs.
+     */
+    private List<String> pinnedOnBrokenSpots(List<ScheduledActivity> activities) {
+        List<String> out = new ArrayList<>();
+        List<BlockedDayRule> blockedDays = blockedDayRepo.findAll();
+        List<SpecialBlockRule> specialBlocks = specialBlockRepo.findAll();
+        for (ScheduledActivity a : activities) {
+            if (!a.isPinned() || !a.isPlaced()) {
+                continue;
+            }
+            TimeSlot ts = a.getTimeSlot();
+            String where = " (" + DAY_RO.getOrDefault(ts.getDayOfWeek(), ts.getDayOfWeek().name())
+                    + ", modulul " + ts.getSlotIndex() + ")";
+            for (SpecialBlockRule r : specialBlocks) {
+                if (r.getTimeSlot() != null && r.getTimeSlot().getId().equals(ts.getId())
+                        && a.getSpecialCategory() != r.getCategory() && audienceMatches(a, r)) {
+                    out.add("Ora fixată „" + a.getSubject().getName() + "”" + where
+                            + " stă peste un interval rezervat pentru " + r.getCategory()
+                            + ". Solverul nu o poate muta, deci orarul nu poate ajunge la 0 încălcări"
+                            + " — scoate lacătul sau șterge blocajul.");
+                    break;
+                }
+            }
+            for (BlockedDayRule r : blockedDays) {
+                if (r.getDayOfWeek() == ts.getDayOfWeek() && a.getStudentGroups().stream().anyMatch(
+                        g -> g.getStudyProgram() == r.getStudyProgram() && g.getYear() == r.getYear())) {
+                    out.add("Ora fixată „" + a.getSubject().getName() + "”" + where
+                            + " stă într-o zi blocată pentru anul " + r.getYear() + ".");
+                    break;
+                }
+            }
+            if (a.isMaster() && !ts.isEveningModule()) {
+                out.add("Ora fixată „" + a.getSubject().getName() + "”" + where
+                        + " e de master, dar nu e într-un modul de seară.");
+            }
+        }
+        return out;
     }
 
     /**

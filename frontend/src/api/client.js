@@ -39,6 +39,10 @@ export const api = {
   async suggestedBudget() {
     return (await json(await fetch('/api/timetable/suggested-budget'))).body;
   },
+  /** Cât costă fiecare criteriu în orarul de acum — „factura" din spatele ponderilor. */
+  async timetableCost() {
+    return (await json(await fetch('/api/timetable/cost'))).body;
+  },
   async unassignedDetails() {
     return (await json(await fetch('/api/timetable/unassigned'))).body;
   },

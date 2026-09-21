@@ -11,6 +11,7 @@ import ai.timefold.solver.core.config.solver.termination.TerminationConfig;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -118,6 +119,46 @@ public class SolverService {
         } finally {
             activeJob.compareAndSet(jobId, null);
         }
+    }
+
+    // ------------------------------------------------------------- what the timetable costs
+
+    /** One line of the bill: how much a rule is costing in the timetable as it stands now. */
+    public record CostLine(String constraint, String title, String level, int matchCount,
+                           int points, double share) {
+    }
+
+    /**
+     * Scores the timetable exactly as it is and breaks the total down per rule. Tuning weights
+     * blind is how a timetable ends up shaped by one criterion nobody meant to favour: the weights
+     * are on the same 0–100 dial, but the things they count are not — empty seats run into the
+     * thousands while gaps in a day run into the dozens. This says who is actually spending.
+     */
+    public List<CostLine> currentCost() {
+        TimetableSolution current = data.loadCurrent();
+        SolverFactory<TimetableSolution> factory = SolverFactory.create(buildConfig(1));
+        SolutionManager<TimetableSolution, HardMediumSoftScore> sm = SolutionManager.create(factory);
+        ScoreAnalysis<HardMediumSoftScore> analysis = sm.analyze(current);
+
+        List<CostLine> lines = new ArrayList<>();
+        int softTotal = 0;
+        for (ConstraintAnalysis<HardMediumSoftScore> ca : analysis.constraintAnalyses()) {
+            softTotal += Math.abs(ca.score().softScore());
+        }
+        for (ConstraintAnalysis<HardMediumSoftScore> ca : analysis.constraintAnalyses()) {
+            HardMediumSoftScore s = ca.score();
+            int points = Math.abs(s.softScore()) + Math.abs(s.mediumScore()) + Math.abs(s.hardScore());
+            if (points == 0 && ca.matchCount() == 0) {
+                continue;
+            }
+            String level = s.hardScore() != 0 ? "HARD" : s.mediumScore() != 0 ? "MEDIUM" : "SOFT";
+            double share = softTotal == 0 || s.softScore() == 0
+                    ? 0 : (double) Math.abs(s.softScore()) / softTotal;
+            lines.add(new CostLine(ca.constraintName(), describe(ca.constraintName(), ca.matchCount())[0],
+                    level, ca.matchCount(), points, share));
+        }
+        lines.sort(Comparator.comparingInt(CostLine::points).reversed());
+        return lines;
     }
 
     // ------------------------------------------------------------- compare budgets

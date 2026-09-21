@@ -47,6 +47,21 @@ const WEIGHT_FIELDS = [
     'Mare: solverul lasă un modul liber între ele sau ține ambele ore în P01. Mic: poate programa drumul imposibil.'],
 ];
 
+/** Linia din „factura" orarului care corespunde unei ponderi. */
+const COST_KEY = {
+  dailyLoadBalance: 'Daily load balance per group',
+  groupGap: "Avoid gaps in a group's day",
+  lateHoursLicense: 'Avoid late hours for license groups',
+  compactness: "Compact a group's day",
+  globalWeeklyBalance: 'Faculty-wide weekly balance',
+  professorPreference: 'Honor professor time preferences',
+  parityPairTogether: 'Alternating halves share slot and room',
+  roomOversize: 'Prefer the smallest adequate room',
+  farRoomCommute: 'Time to walk to a far room',
+  professorWeekDays: 'At most three teaching days a week',
+};
+const costOf = (cost, key) => (cost || []).find((l) => l.constraint === COST_KEY[key]);
+
 /** „M3" când intervalul e fix un modul, altfel orele ca atare (reguli mai vechi). */
 const moduleLabel = (modules, r) => {
   const hit = modules.find((m) => m.start === hhmm(r.startTime) && m.end === hhmm(r.endTime));
@@ -65,6 +80,7 @@ const hhmm = (t) => (t ? String(t).slice(0, 5) : '');
 
 export default function ConstraintsPage() {
   const [weights, setWeights] = useState(null);
+  const [cost, setCost] = useState(null);
   const [saved, setSaved] = useState(false);
   const [groups, setGroups] = useState([]);
   const [professors, setProfessors] = useState([]);
@@ -73,6 +89,7 @@ export default function ConstraintsPage() {
 
   useEffect(() => {
     api.getWeights().then(setWeights).catch(() => {});
+    api.timetableCost().then(setCost).catch(() => setCost([]));
     api.groups().then(setGroups).catch(() => {});
     api.professors().then(setProfessors).catch(() => {});
     api.rooms().then(setRooms).catch(() => {});
@@ -112,6 +129,13 @@ export default function ConstraintsPage() {
       <div className="panel">
         <h2>Ponderi pentru calitatea orarului</h2>
         <p className="muted">
+          Lângă fiecare criteriu scrie <b>cât plătește el chiar acum</b>, în orarul generat: câte
+          unități a adunat × pondere = puncte, și ce parte din total înseamnă. Dacă un criteriu are
+          80% din total, el decide orarul, iar restul sunt zgomot — atunci coboară-i ponderea, nu
+          le urca pe celelalte. Toate pe 100 înseamnă că unitățile decid, nu tu: locurile goale se
+          numără în mii, ferestrele în zeci.
+        </p>
+        <p className="muted">
           Astea nu sunt reguli, sunt preferințe: solverul le încalcă dacă altfel n-ar avea unde
           pune o oră. Scara e 0–100 și contează doar <i>una față de alta</i> — o pondere de 80 se
           impune în fața uneia de 20 când cele două se bat cap în cap. <b>0 înseamnă „nu mă
@@ -120,10 +144,20 @@ export default function ConstraintsPage() {
         </p>
         {!weights ? <p className="muted">Se încarcă…</p> : (
           <>
-            {WEIGHT_FIELDS.map(([key, label, what, effect]) => (
+            {WEIGHT_FIELDS.map(([key, label, what, effect]) => {
+              const linie = costOf(cost, key);
+              return (
               <div key={key} className="weight-row">
                 <div className="weight-label">
-                  <div className="t">{label}</div>
+                  <div className="t">
+                    {label}
+                    {linie && (
+                      <span className="cost" title="Cât plătește criteriul ăsta în orarul de acum">
+                        {linie.matchCount} × {weights[key]} = {linie.points.toLocaleString('ro-RO')} pct
+                        {linie.share > 0 && ` · ${Math.round(linie.share * 100)}% din total`}
+                      </span>
+                    )}
+                  </div>
                   <div className="d">{what}</div>
                   <div className="d">{effect}</div>
                 </div>
@@ -134,7 +168,8 @@ export default function ConstraintsPage() {
                          onChange={(e) => setWeights({ ...weights, [key]: Number(e.target.value) })} />
                 </div>
               </div>
-            ))}
+              );
+            })}
             <button onClick={saveWeights}>Salvează ponderile</button>
             {saved && <span className="badge ok" style={{ marginLeft: 10 }}>Salvat</span>}
           </>
