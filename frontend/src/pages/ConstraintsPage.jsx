@@ -634,6 +634,15 @@ function RuleSection({ title, hint, kind, fields, columns, transform, multi, gro
     try {
       // fiecare combinație bifată (zile × module) devine o regulă
       const names = multi ? [].concat(multi) : [];
+      // Fără asta, un câmp nebifat producea o combinație cu valoarea „undefined”, iar serverul
+      // răspundea cu un 400 despre câmpuri obligatorii pe care formularul nici nu le mai are.
+      const goale = names.filter((n) => empty(form[n]))
+        .map((n) => (fields.find((f) => f.name === n) || {}).label || n);
+      if (goale.length) {
+        setError('Bifează: ' + goale.join(', '));
+        setBusy(false);
+        return;
+      }
       const combos = names.reduce((acc, name) => acc.flatMap(
         (c) => [].concat(form[name]).map((v) => ({ ...c, [name]: v }))), [{}]);
       for (const combo of combos) {
