@@ -629,3 +629,17 @@ tbody tr:hover td { background: #fbfcfe; }
 }
 .room-btn:hover { background: var(--panel-2); color: var(--text); border-style: solid; }
 .room-select { font-size: 11.5px; padding: 1px 4px; max-width: 220px; }
+
+/* scoaterea unei ore din orar */
+.unplace {
+  flex: none; margin-left: auto; padding: 0 3px;
+  background: transparent; border: none; box-shadow: none;
+  color: var(--muted); font-size: 11px; line-height: 1.1; opacity: .3; cursor: pointer;
+}
+.unplace:hover { background: transparent; color: var(--bad); opacity: 1; transform: scale(1.2); }
+.cell-act .t .pin { margin-left: 2px; }
+.droplist.over {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent-border), var(--shadow-md);
+  background: var(--accent-soft);
+}

@@ -44,6 +44,7 @@ export default function TimetablePage() {
   const [loadError, setLoadError] = useState(null);
   const [busyPin, setBusyPin] = useState(false);
   const [unplacedFilter, setUnplacedFilter] = useState('');
+  const [overList, setOverList] = useState(false);
   const [roomPickerFor, setRoomPickerFor] = useState(null);
   const [roomOptions, setRoomOptions] = useState(null);
   const [zoom, setZoom] = useState(1);
@@ -198,6 +199,26 @@ export default function TimetablePage() {
     } finally {
       setBusyPin(false);
       setTimeout(() => setToast(null), 8000);
+    }
+  }
+
+  /**
+   * Scoate o oră din grilă: se întoarce în lista „De plasat", cu lacătul luat (o oră care nu e
+   * nicăieri nu poate fi fixată undeva). Nu șterge activitatea, doar plasarea ei.
+   */
+  async function unplace(a) {
+    setDragId(null);
+    setOverList(false);
+    setBusyPin(true);
+    try {
+      await api.move(a.id, null, null);
+      await reload();
+      setToast({ ok: true, msg: `„${a.subject}" a ieșit din orar — o găsești în „De plasat".` });
+    } catch (e) {
+      setToast({ ok: false, msg: e.message });
+    } finally {
+      setBusyPin(false);
+      setTimeout(() => setToast(null), 6000);
     }
   }
 
@@ -402,7 +423,8 @@ export default function TimetablePage() {
         <p className="hint">
           Trage o activitate în altă celulă pentru a o muta — mutarea se aplică chiar dacă încalcă o
           constrângere hard (primești avertisment). Pune-i lacătul (🔒) dacă vrei ca generarea să o
-          lase exact acolo: restul orarului se va construi în jurul ei. Folosește <b>Potrivește</b> sau <b>Ctrl + scroll</b> ca
+          lase exact acolo: restul orarului se va construi în jurul ei. Ca s-o scoți din orar,
+          apasă <b>✕</b> pe ea sau trage-o înapoi în lista „De plasat". Folosește <b>Potrivește</b> sau <b>Ctrl + scroll</b> ca
           să vezi tot orarul dintr-o privire.
         </p>
       </div>
@@ -426,8 +448,15 @@ export default function TimetablePage() {
         </div>
       )}
 
-      {unplaced.length > 0 && (
-        <div className="panel">
+      {schedule.length > 0 && (
+        <div className={`panel droplist${overList ? ' over' : ''}`}
+             onDragOver={(e) => { e.preventDefault(); setOverList(true); }}
+             onDragLeave={() => setOverList(false)}
+             onDrop={() => {
+               const a = schedule.find((x) => x.id === dragId);
+               if (a && a.assigned) unplace(a);
+               else { setDragId(null); setOverList(false); }
+             }}>
           <h2>De plasat ({unplaced.length})</h2>
           <p className="muted" style={{ marginTop: -6 }}>
             Trage o oră de aici în grilă. Caută după materie, cadru didactic sau grupă — cu orarul
@@ -446,6 +475,11 @@ export default function TimetablePage() {
             <span className="grow" />
             <span className="muted">{shownUnplaced.length} din {unplaced.length} afișate</span>
           </div>
+          {unplaced.length === 0 && (
+            <p className="muted" style={{ margin: 0 }}>
+              Toate orele sunt în orar. Trage una aici dacă vrei s-o scoți.
+            </p>
+          )}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
             {shownUnplaced.map((a) => (
               <div key={a.id} className="cell-act violation" draggable
@@ -558,6 +592,7 @@ export default function TimetablePage() {
                                  .filter(Boolean).join(' · ')}>
                             <div className="t">
                               {a.subject}
+                              <UnplaceButton act={a} onClick={unplace} busy={busyPin} />
                               <PinButton act={a} onToggle={togglePin} />
                             </div>
                             <div className="s">
@@ -646,6 +681,7 @@ export default function TimetablePage() {
                         <div className="t">
                           {a.subjectCode} · {abbrev(a.activityType)}
                           {parityLabel(a) && <span className="parity">{parityLabel(a)}</span>}
+                          <UnplaceButton act={a} onClick={unplace} busy={busyPin} />
                           <PinButton act={a} onToggle={togglePin} />
                         </div>
                         <div className="s">{secondary(a, view)}</div>
@@ -691,6 +727,18 @@ function RoomPicker({ act, open, onOpen, onClose, options, busy, onPick }) {
         <option key={o.id} value={o.id} disabled>{o.name} — {o.reason}</option>
       ))}
     </select>
+  );
+}
+
+/** Scoate ora din orar, înapoi în lista de plasat. Nu șterge nimic din datele ei. */
+function UnplaceButton({ act, onClick, busy }) {
+  return (
+    <button type="button" className="unplace" disabled={busy}
+            title="Scoate ora din orar (se întoarce în lista „De plasat”)"
+            onClick={(e) => { e.stopPropagation(); onClick(act); }}
+            onDragStart={(e) => e.preventDefault()}>
+      ✕
+    </button>
   );
 }
 
