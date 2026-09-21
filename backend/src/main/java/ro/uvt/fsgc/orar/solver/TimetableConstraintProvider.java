@@ -153,8 +153,8 @@ public class TimetableConstraintProvider implements ConstraintProvider {
     Constraint roomUnavailability(ConstraintFactory f) {
         return f.forEach(ScheduledActivity.class)
                 .filter(a -> a.getRoom().getUnavailabilities().stream().anyMatch(un ->
-                        un.overlaps(a.getTimeSlot().getDayOfWeek(),
-                                a.getTimeSlot().getStartTime(), a.getTimeSlot().getEndTime())))
+                        un.blocks(a.getTimeSlot().getDayOfWeek(), a.getTimeSlot().getStartTime(),
+                                a.getTimeSlot().getEndTime(), a.getWeekParity())))
                 .penalizeConfigurable()
                 .asConstraint(ROOM_AVAILABILITY);
     }

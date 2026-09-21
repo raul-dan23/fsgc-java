@@ -53,10 +53,34 @@ public class RoomUnavailability {
     private String reason;
 
     /**
+     * The weeks the window applies to. EVERY_WEEK is the usual case; ODD_WEEKS / EVEN_WEEKS is for
+     * a room taken every other week, which would otherwise have to be blocked for the whole term.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "week_parity", nullable = false)
+    private WeekParity weekParity = WeekParity.EVERY_WEEK;
+
+    /**
      * True if this blocked window overlaps [from, to] on the given day. Overlap (not containment)
      * is the right test: any intersection with a blocked window makes the slot unusable.
+     *
+     * <p>Kept for callers that have no activity at hand; it ignores the week parity, so it answers
+     * "is this window ever in the way", which is the safe side to err on.
      */
     public boolean overlaps(DayOfWeek day, LocalTime from, LocalTime to) {
         return dayOfWeek == day && from.isBefore(endTime) && to.isAfter(startTime);
+    }
+
+    /**
+     * The same question for an hour that runs on certain weeks: a window that only applies on even
+     * weeks does not stand in the way of an hour held on odd ones.
+     */
+    public boolean blocks(DayOfWeek day, LocalTime from, LocalTime to, WeekParity activityParity) {
+        if (!overlaps(day, from, to)) {
+            return false;
+        }
+        return weekParity == WeekParity.EVERY_WEEK
+                || activityParity == WeekParity.EVERY_WEEK
+                || weekParity == activityParity;
     }
 }

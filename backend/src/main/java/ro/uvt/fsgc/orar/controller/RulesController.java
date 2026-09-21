@@ -27,6 +27,7 @@ import ro.uvt.fsgc.orar.domain.SpecialBlockRule;
 import ro.uvt.fsgc.orar.domain.SpecialCategory;
 import ro.uvt.fsgc.orar.domain.StudentGroup;
 import ro.uvt.fsgc.orar.domain.StudyProgram;
+import ro.uvt.fsgc.orar.domain.WeekParity;
 import ro.uvt.fsgc.orar.domain.TimeSlot;
 import ro.uvt.fsgc.orar.repository.BlockedDayRuleRepository;
 import ro.uvt.fsgc.orar.repository.ProfessorRepository;
@@ -342,17 +343,18 @@ public class RulesController {
 
     /** Carries the room name, so the UI never has to render a bare id. */
     public record RoomUnavailView(Long id, Long roomId, String roomName, String dayOfWeek,
-                                  String startTime, String endTime, String reason) {
+                                  String startTime, String endTime, String reason,
+                                  String weekParity) {
     }
 
     private static RoomUnavailView view(RoomUnavailability u) {
         return new RoomUnavailView(u.getId(), u.getRoom().getId(), u.getRoom().getName(),
                 u.getDayOfWeek().name(), u.getStartTime().toString(), u.getEndTime().toString(),
-                u.getReason());
+                u.getReason(), u.getWeekParity().name());
     }
 
     public record RoomUnavailReq(Long roomId, DayOfWeek dayOfWeek, LocalTime startTime,
-                                 LocalTime endTime, String reason) {
+                                 LocalTime endTime, String reason, WeekParity weekParity) {
     }
 
     @GetMapping("/room-unavailabilities")
@@ -387,6 +389,7 @@ public class RulesController {
         u.setStartTime(req.startTime());
         u.setEndTime(req.endTime());
         u.setReason(req.reason() == null || req.reason().isBlank() ? null : req.reason().trim());
+        u.setWeekParity(req.weekParity() == null ? WeekParity.EVERY_WEEK : req.weekParity());
         return ResponseEntity.ok(view(roomUnavailRepo.save(u)));
     }
 

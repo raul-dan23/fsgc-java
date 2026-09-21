@@ -233,6 +233,9 @@ export default function ConstraintsPage() {
           { name: 'slotIndex', label: 'Modulele', type: 'days', options: modules.map((m) => m.value),
             labels: Object.fromEntries(modules.map((m) => [m.value, `M${m.value} · ${m.range}`])),
             required: true },
+          { name: 'weekParity', label: 'Săptămânile', type: 'select',
+            options: ['EVERY_WEEK', 'ODD_WEEKS', 'EVEN_WEEKS'],
+            labels: { EVERY_WEEK: 'Toate', ODD_WEEKS: 'Impare (SI)', EVEN_WEEKS: 'Pare (SP)' } },
           { name: 'reason', label: 'Motiv (opțional)', type: 'text', placeholder: 'ex. renovare' },
         ]}
         transform={(f) => {
@@ -243,12 +246,15 @@ export default function ConstraintsPage() {
             startTime: m ? m.start : f.startTime,
             endTime: m ? m.end : f.endTime,
             reason: f.reason,
+            weekParity: f.weekParity || 'EVERY_WEEK',
           };
         }}
         columns={[
           { label: 'Sala', render: (r) => r.roomName || '—' },
           { label: 'Ziua', render: (r) => DAY_RO[r.dayOfWeek] || r.dayOfWeek },
-          { label: 'Interval blocat', render: (r) => `${hhmm(r.startTime)} – ${hhmm(r.endTime)}` },
+          { label: 'Interval blocat', render: (r) => `${hhmm(r.startTime)} – ${hhmm(r.endTime)}`
+            + (r.weekParity === 'ODD_WEEKS' ? ' (săpt. impare)'
+              : r.weekParity === 'EVEN_WEEKS' ? ' (săpt. pare)' : '') },
           { label: 'Motiv', render: (r) => r.reason || '—' },
         ]}
         group={{
@@ -256,6 +262,7 @@ export default function ConstraintsPage() {
           by: (r) => r.roomName || '—',
           label: (r) => r.roomName || '—',
           chip: (r) => `${DAY_RO[r.dayOfWeek] || r.dayOfWeek} ${moduleLabel(modules, r)}`
+            + (r.weekParity === 'ODD_WEEKS' ? ' SI' : r.weekParity === 'EVEN_WEEKS' ? ' SP' : '')
             + (r.reason ? ` (${r.reason})` : ''),
           rank: (r) => DAYS.indexOf(r.dayOfWeek) * 10000 + minutesOf(r.startTime),
         }}

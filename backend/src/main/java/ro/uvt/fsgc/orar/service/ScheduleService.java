@@ -13,6 +13,7 @@ import ro.uvt.fsgc.orar.domain.RoomTypology;
 import ro.uvt.fsgc.orar.domain.ScheduledActivity;
 import ro.uvt.fsgc.orar.domain.SpecialBlockRule;
 import ro.uvt.fsgc.orar.domain.TimeSlot;
+import ro.uvt.fsgc.orar.domain.WeekParity;
 import ro.uvt.fsgc.orar.dto.ActivityView;
 import ro.uvt.fsgc.orar.repository.ProfessorRoomRestrictionRepository;
 import ro.uvt.fsgc.orar.repository.RoomRepository;
@@ -124,7 +125,8 @@ public class ScheduleService {
             return "prea mică (" + r.getCapacity() + " locuri, " + a.totalStudentCount() + " studenți)";
         }
         if (r.getUnavailabilities().stream()
-                .anyMatch(u -> u.overlaps(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime()))) {
+                .anyMatch(u -> u.blocks(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime(),
+                        a.getWeekParity()))) {
             return "indisponibilă în acest interval";
         }
         String busy = othersInSlot.stream()
@@ -213,7 +215,8 @@ public class ScheduleService {
                 .filter(r -> whyNot(activity, r, ts, others, restrictions) == null)
                 .min(smallestFirst)
                 // nothing entirely free: the roomiest that is at least not taken, then the rest
-                .or(() -> pool.stream().filter(r -> free(r, ts, others)).max(smallestFirst))
+                .or(() -> pool.stream().filter(r -> free(r, ts, others, activity.getWeekParity()))
+                        .max(smallestFirst))
                 .or(() -> pool.stream()
                         .filter(r -> r.getCapacity() >= activity.totalStudentCount())
                         .min(smallestFirst))
@@ -230,12 +233,13 @@ public class ScheduleService {
         return true;
     }
 
-    /** Free = nobody clashing in it at that hour, and not marked unavailable then. */
-    private static boolean free(Room r, TimeSlot ts, List<ScheduledActivity> othersInSlot) {
+    /** Free = nobody clashing in it at that hour, and not closed then for this hour's weeks. */
+    private static boolean free(Room r, TimeSlot ts, List<ScheduledActivity> othersInSlot,
+                                WeekParity parity) {
         boolean taken = othersInSlot.stream()
                 .anyMatch(o -> o.getRoom().getId().equals(r.getId()));
         boolean closed = r.getUnavailabilities().stream()
-                .anyMatch(u -> u.overlaps(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime()));
+                .anyMatch(u -> u.blocks(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime(), parity));
         return !taken && !closed;
     }
 
@@ -302,7 +306,8 @@ public class ScheduleService {
             }
             // Same rule the solver uses: rooms are free unless an unavailability window overlaps.
             room.getUnavailabilities().stream()
-                    .filter(un -> un.overlaps(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime()))
+                    .filter(un -> un.blocks(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime(),
+                        activity.getWeekParity()))
                     .findFirst()
                     .ifPresent(un -> violations.add("Sala este indisponibilă în acest interval ("
                             + un.getStartTime() + "–" + un.getEndTime()

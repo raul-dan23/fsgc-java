@@ -425,7 +425,8 @@ public class GenerationAdvisor {
                 v.add("necesită laborator");
             }
             if (room.getUnavailabilities().stream()
-                    .anyMatch(u -> u.overlaps(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime()))) {
+                    .anyMatch(u -> u.blocks(ts.getDayOfWeek(), ts.getStartTime(), ts.getEndTime(),
+                            a.getWeekParity()))) {
                 v.add("sala indisponibilă");
             }
         }
